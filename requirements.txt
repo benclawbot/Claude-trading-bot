@@ -1,0 +1,25 @@
+# Core data & ML
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+
+# Binance (optional — only needed for live/testnet order execution)
+python-binance>=1.0.17
+
+# HTTP client for public Binance API (market data)
+requests>=2.31
+
+# WebSocket support for real-time prices
+websockets>=12.0
+
+# Dashboard
+plotly>=5.18
+dash>=2.14
+dash-bootstrap-components>=1.5
+
+# Config & logging
+python-dotenv>=1.0
+colorlog>=6.8
+
+# Testing
+pytest>=7.4

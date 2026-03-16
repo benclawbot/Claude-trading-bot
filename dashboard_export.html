@@ -1,0 +1,1809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC Trading Bot Dashboard</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px}
+  .navbar{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;display:flex;justify-content:space-between;align-items:center}
+  .navbar-brand{color:#d29922;font-size:1.1rem;font-weight:bold}
+  .badge-live{color:#f85149;font-size:12px}
+  .badge-testnet{color:#d29922;font-size:12px}
+  .kpi-row{display:flex;gap:10px;padding:14px 16px;flex-wrap:wrap}
+  .tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid #30363d;margin-top:4px}
+  .tab-btn{background:none;border:none;color:#8b949e;padding:10px 16px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
+  .tab-btn:hover{color:#c9d1d9}
+  .tab-btn.active{color:#58a6ff;border-bottom:2px solid #58a6ff}
+  .tab-panel{display:none;padding:16px}
+  .tab-panel.active{display:block}
+  .row{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+  .chart-card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px;flex:1;min-width:300px}
+  .section-title{color:#58a6ff;font-size:14px;font-weight:600;margin:14px 0 8px}
+  .data-table{width:100%;border-collapse:collapse;font-size:12px}
+  .data-table th{background:#161b22;color:#58a6ff;padding:8px 12px;text-align:left;border:1px solid #30363d;white-space:nowrap}
+  .data-table td{padding:7px 12px;border:1px solid #30363d;white-space:nowrap}
+  .data-table tbody tr:nth-child(even){background:rgba(255,255,255,0.02)}
+  .data-table tbody tr:hover{background:rgba(88,166,255,0.05)}
+  .timestamp{color:#8b949e;font-size:11px}
+  .scroll-table{overflow-x:auto;border-radius:8px;border:1px solid #30363d}
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="navbar-brand">₿ BTC Trading Bot</span>
+  <span class="badge-testnet">● TESTNET / DEMO</span>
+  <span class="timestamp">Generated: 2026-02-24 01:37 UTC</span>
+</nav>
+
+<div class="kpi-row">
+  
+    <div style='background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:140px'>
+      <div style='color:#8b949e;font-size:11px;margin-bottom:4px'>Total Balance</div>
+      <div style='color:#3fb950;font-size:22px;font-weight:bold'>$13,762.38</div>
+      <div style='color:#8b949e;font-size:11px;margin-top:2px'>Started $10,000</div>
+    </div>
+  
+    <div style='background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:140px'>
+      <div style='color:#8b949e;font-size:11px;margin-bottom:4px'>Unrealized P&L</div>
+      <div style='color:#3fb950;font-size:22px;font-weight:bold'>$+46.12</div>
+      <div style='color:#8b949e;font-size:11px;margin-top:2px'>Open positions</div>
+    </div>
+  
+    <div style='background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:140px'>
+      <div style='color:#8b949e;font-size:11px;margin-bottom:4px'>Realized P&L</div>
+      <div style='color:#3fb950;font-size:22px;font-weight:bold'>$+3,762.38</div>
+      <div style='color:#8b949e;font-size:11px;margin-top:2px'>Closed trades</div>
+    </div>
+  
+    <div style='background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:140px'>
+      <div style='color:#8b949e;font-size:11px;margin-bottom:4px'>Total Return</div>
+      <div style='color:#3fb950;font-size:22px;font-weight:bold'>+38.09%</div>
+      
+    </div>
+  
+    <div style='background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:140px'>
+      <div style='color:#8b949e;font-size:11px;margin-bottom:4px'>Win Rate</div>
+      <div style='color:#3fb950;font-size:22px;font-weight:bold'>57.5%</div>
+      <div style='color:#8b949e;font-size:11px;margin-top:2px'>46/80 trades</div>
+    </div>
+  
+    <div style='background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:140px'>
+      <div style='color:#8b949e;font-size:11px;margin-bottom:4px'>Open Positions</div>
+      <div style='color:#58a6ff;font-size:22px;font-weight:bold'>0</div>
+      
+    </div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('tab-overview')">Portfolio Overview</button>
+<button class="tab-btn" onclick="showTab('tab-strategies')">Strategy Performance</button>
+<button class="tab-btn" onclick="showTab('tab-positions')">Open Positions</button>
+<button class="tab-btn" onclick="showTab('tab-history')">Trade History</button>
+<button class="tab-btn" onclick="showTab('tab-journal')">Trade Journal</button>
+
+</div>
+
+<!-- TAB 1: Overview -->
+<div id="tab-overview" class="tab-panel active">
+  <div class="row">
+    <div class="chart-card" style="flex:3"><div id="chart-eq"></div></div>
+    <div class="chart-card" style="flex:1"><div id="chart-pie"></div></div>
+  </div>
+  <div class="chart-card"><div id="chart-dd"></div></div>
+</div>
+
+<!-- TAB 2: Strategies -->
+<div id="tab-strategies" class="tab-panel">
+  <div class="section-title">Strategy Metrics</div>
+  <div class="scroll-table">
+    <table class="data-table">
+      <thead><tr>
+        <th>Strategy</th><th>Capital</th><th>Live P&L</th><th>Win Rate</th>
+        <th>Trades</th><th>BT CAGR</th><th>BT Win Rate</th>
+      </tr></thead>
+      <tbody><tr>
+          <td style='color:#58a6ff;font-weight:bold'>RSI_Bollinger</td>
+          <td>$2,000</td>
+          <td style='color:#3fb950'>$+64.55</td>
+          <td>75.0%</td><td>12</td>
+          <td style='color:#3fb950'>60.0%</td>
+          <td>52.0%</td>
+        </tr><tr>
+          <td style='color:#58a6ff;font-weight:bold'>MACD_Momentum</td>
+          <td>$2,000</td>
+          <td style='color:#3fb950'>$+75.45</td>
+          <td>59.1%</td><td>22</td>
+          <td style='color:#3fb950'>65.0%</td>
+          <td>54.0%</td>
+        </tr><tr>
+          <td style='color:#58a6ff;font-weight:bold'>EMA_Crossover</td>
+          <td>$2,000</td>
+          <td style='color:#f85149'>$-2.63</td>
+          <td>47.1%</td><td>17</td>
+          <td style='color:#3fb950'>70.0%</td>
+          <td>56.0%</td>
+        </tr><tr>
+          <td style='color:#58a6ff;font-weight:bold'>Breakout</td>
+          <td>$2,000</td>
+          <td style='color:#3fb950'>$+25.51</td>
+          <td>50.0%</td><td>16</td>
+          <td style='color:#3fb950'>75.0%</td>
+          <td>58.0%</td>
+        </tr><tr>
+          <td style='color:#58a6ff;font-weight:bold'>ML_Adaptive</td>
+          <td>$2,000</td>
+          <td style='color:#3fb950'>$+55.11</td>
+          <td>61.5%</td><td>13</td>
+          <td style='color:#3fb950'>80.0%</td>
+          <td>60.0%</td>
+        </tr></tbody>
+    </table>
+  </div>
+  <div class="section-title">Equity Curves</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    
+  </div>
+</div>
+
+<!-- TAB 3: Open Positions -->
+<div id="tab-positions" class="tab-panel">
+  <div class="section-title">0 Open Position(s)</div>
+  <div style='color:#8b949e;padding:30px;text-align:center'>No open positions</div>
+</div>
+
+<!-- TAB 4: Trade History -->
+<div id="tab-history" class="tab-panel">
+  <div class="row">
+    <div class="chart-card" style="flex:3"><div id="chart-cum"></div></div>
+    <div class="chart-card" style="flex:2"><div id="chart-hist"></div></div>
+  </div>
+  <div class="section-title">Trade Log (80 trades)</div>
+  <div class="scroll-table">
+    <table class="data-table">
+      <thead><tr>
+        <th>Exit Date</th><th>Strategy</th><th>Side</th>
+        <th>Entry $</th><th>Exit $</th><th>P&L $</th><th>P&L %</th>
+        <th>Duration</th><th>Exit Reason</th>
+      </tr></thead>
+      <tbody>
+    <tr>
+      <td>2026-02-18T14:09</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$41,818</td>
+      <td>$44,580</td>
+      <td style='color:#3fb950'>$+13.21</td>
+      <td style='color:#3fb950'>+6.60%</td>
+      <td>9.9h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-28T16:26</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$48,356</td>
+      <td>$47,948</td>
+      <td style='color:#f85149'>$-1.69</td>
+      <td style='color:#f85149'>-0.85%</td>
+      <td>3.4h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-25T01:05</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$67,791</td>
+      <td>$69,258</td>
+      <td style='color:#3fb950'>$+4.33</td>
+      <td style='color:#3fb950'>+2.16%</td>
+      <td>41.6h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-05T23:51</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$40,065</td>
+      <td>$39,732</td>
+      <td style='color:#f85149'>$-1.66</td>
+      <td style='color:#f85149'>-0.83%</td>
+      <td>33.7h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-19T13:03</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$44,644</td>
+      <td>$44,358</td>
+      <td style='color:#f85149'>$-1.28</td>
+      <td style='color:#f85149'>-0.64%</td>
+      <td>36.2h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-23T06:14</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$55,086</td>
+      <td>$56,243</td>
+      <td style='color:#3fb950'>$+4.20</td>
+      <td style='color:#3fb950'>+2.10%</td>
+      <td>9.7h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-17T04:20</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$43,597</td>
+      <td>$44,784</td>
+      <td style='color:#3fb950'>$+5.45</td>
+      <td style='color:#3fb950'>+2.72%</td>
+      <td>4.9h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-09T14:57</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$68,041</td>
+      <td>$66,832</td>
+      <td style='color:#f85149'>$-3.55</td>
+      <td style='color:#f85149'>-1.78%</td>
+      <td>32.6h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-02-18T05:54</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$40,279</td>
+      <td>$42,270</td>
+      <td style='color:#3fb950'>$+9.88</td>
+      <td style='color:#3fb950'>+4.94%</td>
+      <td>11.0h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-03T04:00</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$66,378</td>
+      <td>$63,530</td>
+      <td style='color:#f85149'>$-8.58</td>
+      <td style='color:#f85149'>-4.29%</td>
+      <td>29.7h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-19T22:36</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$60,036</td>
+      <td>$64,552</td>
+      <td style='color:#3fb950'>$+15.04</td>
+      <td style='color:#3fb950'>+7.52%</td>
+      <td>7.3h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-12T10:47</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$48,170</td>
+      <td>$51,072</td>
+      <td style='color:#3fb950'>$+12.05</td>
+      <td style='color:#3fb950'>+6.02%</td>
+      <td>41.1h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-24T18:08</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$42,769</td>
+      <td>$41,163</td>
+      <td style='color:#f85149'>$-7.51</td>
+      <td style='color:#f85149'>-3.75%</td>
+      <td>30.9h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-12T20:57</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$56,827</td>
+      <td>$56,403</td>
+      <td style='color:#f85149'>$-1.49</td>
+      <td style='color:#f85149'>-0.75%</td>
+      <td>40.2h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-07T00:09</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$43,823</td>
+      <td>$43,405</td>
+      <td style='color:#f85149'>$-1.91</td>
+      <td style='color:#f85149'>-0.95%</td>
+      <td>43.2h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-17T13:41</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$50,610</td>
+      <td>$54,215</td>
+      <td style='color:#3fb950'>$+14.25</td>
+      <td style='color:#3fb950'>+7.12%</td>
+      <td>44.5h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-04T15:14</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$66,442</td>
+      <td>$65,323</td>
+      <td style='color:#f85149'>$-3.37</td>
+      <td style='color:#f85149'>-1.69%</td>
+      <td>38.7h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-23T18:49</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$44,776</td>
+      <td>$46,423</td>
+      <td style='color:#3fb950'>$+7.36</td>
+      <td style='color:#3fb950'>+3.68%</td>
+      <td>11.5h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-24T09:29</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$49,156</td>
+      <td>$50,430</td>
+      <td style='color:#3fb950'>$+5.19</td>
+      <td style='color:#3fb950'>+2.59%</td>
+      <td>19.7h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-03T03:40</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$50,534</td>
+      <td>$53,443</td>
+      <td style='color:#3fb950'>$+11.51</td>
+      <td style='color:#3fb950'>+5.76%</td>
+      <td>45.1h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-17T22:53</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$57,418</td>
+      <td>$58,146</td>
+      <td style='color:#3fb950'>$+2.54</td>
+      <td style='color:#3fb950'>+1.27%</td>
+      <td>35.2h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-10T22:58</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$51,556</td>
+      <td>$52,991</td>
+      <td style='color:#3fb950'>$+5.57</td>
+      <td style='color:#3fb950'>+2.78%</td>
+      <td>25.4h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-16T17:13</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$52,939</td>
+      <td>$56,880</td>
+      <td style='color:#3fb950'>$+14.89</td>
+      <td style='color:#3fb950'>+7.45%</td>
+      <td>40.9h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-20T08:27</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$60,007</td>
+      <td>$58,889</td>
+      <td style='color:#f85149'>$-3.73</td>
+      <td style='color:#f85149'>-1.86%</td>
+      <td>32.3h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-11T22:40</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$52,182</td>
+      <td>$53,814</td>
+      <td style='color:#3fb950'>$+6.25</td>
+      <td style='color:#3fb950'>+3.13%</td>
+      <td>28.3h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2025-12-30T23:35</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$53,265</td>
+      <td>$51,736</td>
+      <td style='color:#f85149'>$-5.74</td>
+      <td style='color:#f85149'>-2.87%</td>
+      <td>32.0h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-02-05T13:01</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$42,802</td>
+      <td>$43,933</td>
+      <td style='color:#3fb950'>$+5.29</td>
+      <td style='color:#3fb950'>+2.64%</td>
+      <td>10.4h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2025-12-31T08:04</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$58,338</td>
+      <td>$60,781</td>
+      <td style='color:#3fb950'>$+8.38</td>
+      <td style='color:#3fb950'>+4.19%</td>
+      <td>10.1h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-08T18:54</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$47,320</td>
+      <td>$47,811</td>
+      <td style='color:#3fb950'>$+2.08</td>
+      <td style='color:#3fb950'>+1.04%</td>
+      <td>42.6h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-20T14:11</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$64,123</td>
+      <td>$66,850</td>
+      <td style='color:#3fb950'>$+8.50</td>
+      <td style='color:#3fb950'>+4.25%</td>
+      <td>40.9h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-10T20:23</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$68,501</td>
+      <td>$72,124</td>
+      <td style='color:#3fb950'>$+10.58</td>
+      <td style='color:#3fb950'>+5.29%</td>
+      <td>21.1h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-10T17:56</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$62,310</td>
+      <td>$64,063</td>
+      <td style='color:#3fb950'>$+5.63</td>
+      <td style='color:#3fb950'>+2.81%</td>
+      <td>14.0h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-07T18:15</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$48,238</td>
+      <td>$46,446</td>
+      <td style='color:#f85149'>$-7.43</td>
+      <td style='color:#f85149'>-3.71%</td>
+      <td>7.5h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-29T05:23</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$41,927</td>
+      <td>$40,854</td>
+      <td style='color:#f85149'>$-5.12</td>
+      <td style='color:#f85149'>-2.56%</td>
+      <td>19.3h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-01T18:35</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$54,309</td>
+      <td>$55,988</td>
+      <td style='color:#3fb950'>$+6.18</td>
+      <td style='color:#3fb950'>+3.09%</td>
+      <td>45.8h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-31T18:16</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$54,647</td>
+      <td>$53,109</td>
+      <td style='color:#f85149'>$-5.63</td>
+      <td style='color:#f85149'>-2.81%</td>
+      <td>35.0h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-20T08:40</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$67,208</td>
+      <td>$70,999</td>
+      <td style='color:#3fb950'>$+11.28</td>
+      <td style='color:#3fb950'>+5.64%</td>
+      <td>7.4h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-08T19:48</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$51,373</td>
+      <td>$49,560</td>
+      <td style='color:#f85149'>$-7.06</td>
+      <td style='color:#f85149'>-3.53%</td>
+      <td>36.3h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2025-12-26T18:55</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$54,109</td>
+      <td>$54,848</td>
+      <td style='color:#3fb950'>$+2.73</td>
+      <td style='color:#3fb950'>+1.36%</td>
+      <td>31.6h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-15T13:41</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$68,488</td>
+      <td>$65,127</td>
+      <td style='color:#f85149'>$-9.82</td>
+      <td style='color:#f85149'>-4.91%</td>
+      <td>32.5h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-18T23:46</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$60,984</td>
+      <td>$62,310</td>
+      <td style='color:#3fb950'>$+4.35</td>
+      <td style='color:#3fb950'>+2.17%</td>
+      <td>34.8h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-13T21:08</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$43,243</td>
+      <td>$41,688</td>
+      <td style='color:#f85149'>$-7.19</td>
+      <td style='color:#f85149'>-3.60%</td>
+      <td>19.6h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-18T16:19</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$43,057</td>
+      <td>$46,050</td>
+      <td style='color:#3fb950'>$+13.90</td>
+      <td style='color:#3fb950'>+6.95%</td>
+      <td>38.4h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-14T18:30</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$55,982</td>
+      <td>$56,812</td>
+      <td style='color:#3fb950'>$+2.97</td>
+      <td style='color:#3fb950'>+1.48%</td>
+      <td>40.9h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-10T09:39</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$68,824</td>
+      <td>$73,504</td>
+      <td style='color:#3fb950'>$+13.60</td>
+      <td style='color:#3fb950'>+6.80%</td>
+      <td>9.3h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-05T18:30</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$53,946</td>
+      <td>$56,723</td>
+      <td style='color:#3fb950'>$+10.29</td>
+      <td style='color:#3fb950'>+5.15%</td>
+      <td>40.0h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-03T03:49</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$62,514</td>
+      <td>$66,063</td>
+      <td style='color:#3fb950'>$+11.35</td>
+      <td style='color:#3fb950'>+5.68%</td>
+      <td>41.0h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-12T19:50</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$63,935</td>
+      <td>$63,271</td>
+      <td style='color:#f85149'>$-2.08</td>
+      <td style='color:#f85149'>-1.04%</td>
+      <td>25.3h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-15T11:55</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$54,657</td>
+      <td>$57,846</td>
+      <td style='color:#3fb950'>$+11.67</td>
+      <td style='color:#3fb950'>+5.83%</td>
+      <td>22.1h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-02T00:42</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$52,132</td>
+      <td>$51,083</td>
+      <td style='color:#f85149'>$-4.02</td>
+      <td style='color:#f85149'>-2.01%</td>
+      <td>21.0h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-18T12:22</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$61,086</td>
+      <td>$58,722</td>
+      <td style='color:#f85149'>$-7.74</td>
+      <td style='color:#f85149'>-3.87%</td>
+      <td>6.6h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-08T03:07</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$46,492</td>
+      <td>$49,315</td>
+      <td style='color:#3fb950'>$+12.14</td>
+      <td style='color:#3fb950'>+6.07%</td>
+      <td>14.3h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-21T08:25</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$46,824</td>
+      <td>$44,513</td>
+      <td style='color:#f85149'>$-9.87</td>
+      <td style='color:#f85149'>-4.94%</td>
+      <td>46.8h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-25T23:10</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$43,078</td>
+      <td>$41,475</td>
+      <td style='color:#f85149'>$-7.44</td>
+      <td style='color:#f85149'>-3.72%</td>
+      <td>46.4h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-16T10:44</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$64,663</td>
+      <td>$61,646</td>
+      <td style='color:#f85149'>$-9.33</td>
+      <td style='color:#f85149'>-4.67%</td>
+      <td>8.0h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-18T06:29</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$69,818</td>
+      <td>$68,728</td>
+      <td style='color:#f85149'>$-3.12</td>
+      <td style='color:#f85149'>-1.56%</td>
+      <td>37.5h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-16T05:18</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$65,805</td>
+      <td>$67,870</td>
+      <td style='color:#3fb950'>$+6.28</td>
+      <td style='color:#3fb950'>+3.14%</td>
+      <td>46.1h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-20T06:00</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$47,939</td>
+      <td>$46,060</td>
+      <td style='color:#f85149'>$-7.84</td>
+      <td style='color:#f85149'>-3.92%</td>
+      <td>20.2h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2025-12-31T23:48</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$40,979</td>
+      <td>$39,452</td>
+      <td style='color:#f85149'>$-7.46</td>
+      <td style='color:#f85149'>-3.73%</td>
+      <td>44.4h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2025-12-28T14:57</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$52,754</td>
+      <td>$55,673</td>
+      <td style='color:#3fb950'>$+11.07</td>
+      <td style='color:#3fb950'>+5.53%</td>
+      <td>7.7h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-31T22:46</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$53,175</td>
+      <td>$54,838</td>
+      <td style='color:#3fb950'>$+6.26</td>
+      <td style='color:#3fb950'>+3.13%</td>
+      <td>24.5h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-23T06:45</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$66,683</td>
+      <td>$70,168</td>
+      <td style='color:#3fb950'>$+10.45</td>
+      <td style='color:#3fb950'>+5.23%</td>
+      <td>46.2h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-23T14:20</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$69,987</td>
+      <td>$72,007</td>
+      <td style='color:#3fb950'>$+5.77</td>
+      <td style='color:#3fb950'>+2.89%</td>
+      <td>9.2h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-26T00:01</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$45,445</td>
+      <td>$47,918</td>
+      <td style='color:#3fb950'>$+10.89</td>
+      <td style='color:#3fb950'>+5.44%</td>
+      <td>23.1h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-07T09:36</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$65,732</td>
+      <td>$64,497</td>
+      <td style='color:#f85149'>$-3.76</td>
+      <td style='color:#f85149'>-1.88%</td>
+      <td>39.2h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-31T19:07</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$49,436</td>
+      <td>$49,122</td>
+      <td style='color:#f85149'>$-1.27</td>
+      <td style='color:#f85149'>-0.63%</td>
+      <td>31.9h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-15T23:14</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$45,627</td>
+      <td>$44,899</td>
+      <td style='color:#f85149'>$-3.19</td>
+      <td style='color:#f85149'>-1.60%</td>
+      <td>10.6h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-16T07:05</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$66,425</td>
+      <td>$67,224</td>
+      <td style='color:#3fb950'>$+2.40</td>
+      <td style='color:#3fb950'>+1.20%</td>
+      <td>12.2h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2025-12-28T07:48</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$56,568</td>
+      <td>$56,265</td>
+      <td style='color:#f85149'>$-1.07</td>
+      <td style='color:#f85149'>-0.53%</td>
+      <td>31.4h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-27T04:22</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$52,465</td>
+      <td>$54,724</td>
+      <td style='color:#3fb950'>$+8.61</td>
+      <td style='color:#3fb950'>+4.31%</td>
+      <td>19.0h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-29T18:26</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$65,921</td>
+      <td>$64,968</td>
+      <td style='color:#f85149'>$-2.89</td>
+      <td style='color:#f85149'>-1.44%</td>
+      <td>39.6h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-04T04:24</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$65,958</td>
+      <td>$68,854</td>
+      <td style='color:#3fb950'>$+8.78</td>
+      <td style='color:#3fb950'>+4.39%</td>
+      <td>26.5h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-02T14:55</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$69,423</td>
+      <td>$67,148</td>
+      <td style='color:#f85149'>$-6.55</td>
+      <td style='color:#f85149'>-3.28%</td>
+      <td>16.0h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-02-16T01:45</td>
+      <td style='color:#58a6ff'>Breakout</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$69,652</td>
+      <td>$73,528</td>
+      <td style='color:#3fb950'>$+11.13</td>
+      <td style='color:#3fb950'>+5.56%</td>
+      <td>2.7h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-23T21:15</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$66,091</td>
+      <td>$68,789</td>
+      <td style='color:#3fb950'>$+8.16</td>
+      <td style='color:#3fb950'>+4.08%</td>
+      <td>1.7h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-11T21:09</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$54,085</td>
+      <td>$55,907</td>
+      <td style='color:#3fb950'>$+6.74</td>
+      <td style='color:#3fb950'>+3.37%</td>
+      <td>4.8h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-25T19:28</td>
+      <td style='color:#58a6ff'>ML_Adaptive</td>
+      <td style='color:#f85149'>SHORT</td>
+      <td>$68,624</td>
+      <td>$73,573</td>
+      <td style='color:#3fb950'>$+14.42</td>
+      <td style='color:#3fb950'>+7.21%</td>
+      <td>2.7h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr>
+    <tr>
+      <td>2026-01-16T11:33</td>
+      <td style='color:#58a6ff'>EMA_Crossover</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$62,403</td>
+      <td>$59,559</td>
+      <td style='color:#f85149'>$-9.11</td>
+      <td style='color:#f85149'>-4.56%</td>
+      <td>21.9h</td>
+      <td style='color:#8b949e'>STOP_LOSS</td>
+    </tr>
+    <tr>
+      <td>2026-01-28T09:18</td>
+      <td style='color:#58a6ff'>RSI_Bollinger</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$49,731</td>
+      <td>$48,047</td>
+      <td style='color:#f85149'>$-6.77</td>
+      <td style='color:#f85149'>-3.39%</td>
+      <td>27.6h</td>
+      <td style='color:#8b949e'>SIGNAL_EXIT</td>
+    </tr>
+    <tr>
+      <td>2026-02-10T01:51</td>
+      <td style='color:#58a6ff'>MACD_Momentum</td>
+      <td style='color:#3fb950'>LONG</td>
+      <td>$42,369</td>
+      <td>$44,631</td>
+      <td style='color:#3fb950'>$+10.68</td>
+      <td style='color:#3fb950'>+5.34%</td>
+      <td>28.4h</td>
+      <td style='color:#8b949e'>TAKE_PROFIT</td>
+    </tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- TAB 5: Journal -->
+<div id="tab-journal" class="tab-panel">
+  <div class="section-title">Trade Journal (50 entries)</div>
+  
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>RSI_Bollinger</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+6.60%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $41,818 on RSI_Bollinger.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +6.60%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>Breakout</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-0.85%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $48,356 on Breakout.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -0.85%. Reason: STOP_LOSS.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>RSI_Bollinger</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+2.16%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $67,791 on RSI_Bollinger.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +2.16%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-0.83%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $40,065 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -0.83%. Reason: SIGNAL_EXIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>ML_Adaptive</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-0.64%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $44,644 on ML_Adaptive.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -0.64%. Reason: STOP_LOSS.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>ML_Adaptive</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+2.10%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $55,086 on ML_Adaptive.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +2.10%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+2.72%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $43,597 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +2.72%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>ML_Adaptive</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-1.78%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $68,041 on ML_Adaptive.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -1.78%. Reason: STOP_LOSS.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>EMA_Crossover</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+4.94%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $40,279 on EMA_Crossover.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +4.94%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>EMA_Crossover</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-4.29%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $66,378 on EMA_Crossover.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -4.29%. Reason: SIGNAL_EXIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>ML_Adaptive</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+7.52%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $60,036 on ML_Adaptive.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +7.52%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>RSI_Bollinger</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+6.02%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $48,170 on RSI_Bollinger.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +6.02%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>EMA_Crossover</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-3.75%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $42,769 on EMA_Crossover.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -3.75%. Reason: STOP_LOSS.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>Breakout</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-0.75%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $56,827 on Breakout.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -0.75%. Reason: STOP_LOSS.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-0.95%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $43,823 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -0.95%. Reason: STOP_LOSS.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+7.12%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $50,610 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +7.12%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-1.69%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $66,442 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -1.69%. Reason: SIGNAL_EXIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+3.68%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $44,776 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +3.68%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>Breakout</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+2.59%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $49,156 on Breakout.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +2.59%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>RSI_Bollinger</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+5.76%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $50,534 on RSI_Bollinger.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +5.76%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>EMA_Crossover</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+1.27%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $57,418 on EMA_Crossover.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +1.27%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>ML_Adaptive</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+2.78%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $51,556 on ML_Adaptive.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +2.78%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+7.45%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $52,939 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +7.45%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>EMA_Crossover</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-1.86%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $60,007 on EMA_Crossover.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -1.86%. Reason: SIGNAL_EXIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+3.13%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $52,182 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +3.13%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #f85149;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>Breakout</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#3d1a1a;color:#f85149;padding:2px 8px;border-radius:4px;font-size:11px'>-2.87%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $53,265 on Breakout.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for -2.87%. Reason: STOP_LOSS.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Entry was premature; momentum reversed.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Tighten stop-loss in volatile periods.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>ML_Adaptive</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+2.64%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $42,802 on ML_Adaptive.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +2.64%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+4.19%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $58,338 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +4.19%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>Breakout</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>SHORT</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+1.04%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>SHORT entry at $47,320 on Breakout.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +1.04%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+    <div style='border:1px solid #3fb950;border-radius:8px;margin-bottom:14px;overflow:hidden'>
+      <div style='background:#161b22;padding:10px 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid #30363d'>
+        <span style='color:#58a6ff;font-weight:bold'>MACD_Momentum</span>
+        <span style='background:#30363d;color:#c9d1d9;padding:2px 8px;border-radius:4px;font-size:11px'>LONG</span>
+        <span style='background:#1a4731;color:#3fb950;padding:2px 8px;border-radius:4px;font-size:11px'>+4.25%</span>
+        <span style='color:#8b949e;font-size:11px;margin-left:auto'>2026-02-24 01:28</span>
+      </div>
+      <div style='background:#0d1117;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px'>
+        <div>
+          <div style='color:#c9d1d9;font-size:12px;margin-bottom:4px'><b>Setup</b></div>
+          <div style='color:#8b949e;font-size:12px'>LONG entry at $64,123 on MACD_Momentum.</div>
+          <div style='margin-top:6px;color:#c9d1d9;font-size:12px'><b>Outcome</b></div>
+          <div style='color:#8b949e;font-size:12px'>Closed for +4.25%. Reason: TAKE_PROFIT.</div>
+        </div>
+        <div>
+          <div style='color:#d29922;font-size:12px;margin-bottom:4px'><b>Reflection</b></div>
+          <div style='color:#c9d1d9;font-size:12px;font-style:italic;border-left:3px solid #30363d;padding-left:10px'>Signal aligned with trend. Executed cleanly.</div>
+        </div>
+        <div>
+          <div style='color:#bc8cff;font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
+          <div style='color:#c9d1d9;font-size:12px'>Continue monitoring volume ratio.</div>
+        </div>
+      </div>
+    </div>
+</div>
+
+<script>
+function showTab(id){
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b=>{
+    if(b.getAttribute('onclick').includes(id)) b.classList.add('active');
+  });
+}
+
+// Render Plotly charts
+const eq   = {"data":[{"fill":"tozeroy","fillcolor":"rgba(88,166,255,0.10)","line":{"color":"#58a6ff","width":2.5},"name":"Portfolio","x":["2025-11-27T01:28:19.023116","2025-11-28T01:28:19.023256","2025-11-29T01:28:19.023290","2025-11-30T01:28:19.023299","2025-12-01T01:28:19.023304","2025-12-02T01:28:19.023310","2025-12-03T01:28:19.023314","2025-12-04T01:28:19.023325","2025-12-05T01:28:19.023335","2025-12-06T01:28:19.023342","2025-12-07T01:28:19.023347","2025-12-08T01:28:19.023352","2025-12-09T01:28:19.023356","2025-12-10T01:28:19.023361","2025-12-11T01:28:19.023365","2025-12-12T01:28:19.023369","2025-12-13T01:28:19.023373","2025-12-14T01:28:19.023377","2025-12-15T01:28:19.023381","2025-12-16T01:28:19.023389","2025-12-17T01:28:19.023393","2025-12-18T01:28:19.023397","2025-12-19T01:28:19.023401","2025-12-20T01:28:19.023405","2025-12-21T01:28:19.023409","2025-12-22T01:28:19.023413","2025-12-23T01:28:19.023417","2025-12-24T01:28:19.023421","2025-12-25T01:28:19.023425","2025-12-26T01:28:19.023429","2025-12-27T01:28:19.023433","2025-12-28T01:28:19.023437","2025-12-29T01:28:19.023441","2025-12-30T01:28:19.023445","2025-12-31T01:28:19.023449","2026-01-01T01:28:19.023453","2026-01-02T01:28:19.023457","2026-01-03T01:28:19.023461","2026-01-04T01:28:19.023466","2026-01-05T01:28:19.023470","2026-01-06T01:28:19.023474","2026-01-07T01:28:19.023478","2026-01-08T01:28:19.023482","2026-01-09T01:28:19.023486","2026-01-10T01:28:19.023490","2026-01-11T01:28:19.023497","2026-01-12T01:28:19.023502","2026-01-13T01:28:19.023508","2026-01-14T01:28:19.023513","2026-01-15T01:28:19.023519","2026-01-16T01:28:19.023525","2026-01-17T01:28:19.023532","2026-01-18T01:28:19.023538","2026-01-19T01:28:19.023543","2026-01-20T01:28:19.023547","2026-01-21T01:28:19.023551","2026-01-22T01:28:19.023555","2026-01-23T01:28:19.023559","2026-01-24T01:28:19.023563","2026-01-25T01:28:19.023567","2026-01-26T01:28:19.023571","2026-01-27T01:28:19.023575","2026-01-28T01:28:19.023579","2026-01-29T01:28:19.023584","2026-01-30T01:28:19.023587","2026-01-31T01:28:19.023596","2026-02-01T01:28:19.023603","2026-02-02T01:28:19.023607","2026-02-03T01:28:19.023611","2026-02-04T01:28:19.023615","2026-02-05T01:28:19.023621","2026-02-06T01:28:19.023626","2026-02-07T01:28:19.023630","2026-02-08T01:28:19.023634","2026-02-09T01:28:19.023639","2026-02-10T01:28:19.023643","2026-02-11T01:28:19.023647","2026-02-12T01:28:19.023651","2026-02-13T01:28:19.023655","2026-02-14T01:28:19.023659","2026-02-15T01:28:19.023663","2026-02-16T01:28:19.023667","2026-02-17T01:28:19.023670","2026-02-18T01:28:19.023675","2026-02-19T01:28:19.023678","2026-02-20T01:28:19.023682","2026-02-21T01:28:19.023686","2026-02-22T01:28:19.023691","2026-02-23T01:28:19.023694","2026-02-24T01:28:19.023700"],"y":{"dtype":"f8","bdata":"j8L1KDyRw0ApXI\u002fCVZnDQHE9CtdDo8NAAAAAACB2w0DNzMzMbHzDQHE9CtcDkMNAmpmZmVm5w0ApXI\u002fC9czDQOF6FK4n5sNAhetRuN4qxEC4HoXrUVDEQDMzMzNzI8RAPQrXo\u002fBWxEDXo3A9ilzEQM3MzMzMjMRAFK5H4bptxEBI4XoUzg\u002fEQOF6FK5HBsRAZmZmZuYwxECF61G4\u002fg3EQBSuR+HaGcRAuB6F6zEdxEA9Ctej8EbEQNejcD0KZcRAcT0K14NaxECF61G4PkzEQMP1KFxvUcRAj8L1KDzCxECamZmZ2fLEQD0K16PwP8VAKVyPwlWOxUCPwvUovJrFQArXo3B91cVArkfherSlxUCkcD0KV6jFQD0K16MQ2cVAKVyPwpUFxkBxPQrXA\u002fvFQHE9CtfDNsZAXI\u002fC9QguxkApXI\u002fCNR7GQHE9CtfjIcZA4XoUricZxkC4HoXr8TzGQM3MzMzsWcZA4XoUrsdyxkAUrkfhmpDGQKRwPQo3c8ZAhetRuN68xkA9Ctej8MzGQKRwPQrXKMdAKVyPwhVAx0AAAAAAwErHQFyPwvWIoMdApHA9Crc\u002fx0BSuB6Fa3PHQM3MzMxMZ8dA16NwPSp5x0AAAAAAoHbHQK5H4XoUysdACtejcB3hx0AAAAAAwLbHQK5H4Xr088dAexSuR4EGyEDhehSuJ1zIQB+F61HYLchAj8L1KNyWyEAfhetRGFXIQK5H4Xo0tMhApHA9CjfryEDhehSup77IQD0K16OQ28hAUrgehYvPyEB7FK5H4fLIQPYoXI9iE8lAKVyPwvVQyUCamZmZeSrJQGZmZmZmVclAZmZmZoZEyUCuR+F6lJLJQLgehevx6MlAzczMzCwdykBxPQrXQz7KQPYoXI+CQspAPQrXoxBdykAUrkfhWo3KQBSuR+HaQ8pA9ihcjyJoykBmZmZmhqvKQD0K16Mw4cpA"},"type":"scatter"}],"layout":{"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"shapes":[{"line":{"color":"#8b949e","dash":"dot"},"type":"line","x0":0,"x1":1,"xref":"x domain","y0":10000.0,"y1":10000.0,"yref":"y"}],"annotations":[{"font":{"color":"#8b949e"},"showarrow":false,"text":"Initial $10,000","x":1,"xanchor":"right","xref":"x domain","y":10000.0,"yanchor":"bottom","yref":"y"}],"font":{"color":"#c9d1d9"},"xaxis":{"gridcolor":"#30363d","zeroline":false},"yaxis":{"gridcolor":"#30363d","zeroline":false,"tickprefix":"$","tickformat":",.0f"},"legend":{"bgcolor":"#161b22","bordercolor":"#30363d","borderwidth":1},"margin":{"l":50,"r":20,"t":50,"b":40},"title":{"text":"Portfolio Equity Curve","font":{"color":"#58a6ff"}},"plot_bgcolor":"#0d1117","paper_bgcolor":"#161b22","height":320}};
+const dd   = {"data":[{"fill":"tozeroy","fillcolor":"rgba(248,81,73,0.12)","line":{"color":"#f85149","width":1.5},"name":"Drawdown","x":["2025-11-27T01:28:19.023116","2025-11-28T01:28:19.023256","2025-11-29T01:28:19.023290","2025-11-30T01:28:19.023299","2025-12-01T01:28:19.023304","2025-12-02T01:28:19.023310","2025-12-03T01:28:19.023314","2025-12-04T01:28:19.023325","2025-12-05T01:28:19.023335","2025-12-06T01:28:19.023342","2025-12-07T01:28:19.023347","2025-12-08T01:28:19.023352","2025-12-09T01:28:19.023356","2025-12-10T01:28:19.023361","2025-12-11T01:28:19.023365","2025-12-12T01:28:19.023369","2025-12-13T01:28:19.023373","2025-12-14T01:28:19.023377","2025-12-15T01:28:19.023381","2025-12-16T01:28:19.023389","2025-12-17T01:28:19.023393","2025-12-18T01:28:19.023397","2025-12-19T01:28:19.023401","2025-12-20T01:28:19.023405","2025-12-21T01:28:19.023409","2025-12-22T01:28:19.023413","2025-12-23T01:28:19.023417","2025-12-24T01:28:19.023421","2025-12-25T01:28:19.023425","2025-12-26T01:28:19.023429","2025-12-27T01:28:19.023433","2025-12-28T01:28:19.023437","2025-12-29T01:28:19.023441","2025-12-30T01:28:19.023445","2025-12-31T01:28:19.023449","2026-01-01T01:28:19.023453","2026-01-02T01:28:19.023457","2026-01-03T01:28:19.023461","2026-01-04T01:28:19.023466","2026-01-05T01:28:19.023470","2026-01-06T01:28:19.023474","2026-01-07T01:28:19.023478","2026-01-08T01:28:19.023482","2026-01-09T01:28:19.023486","2026-01-10T01:28:19.023490","2026-01-11T01:28:19.023497","2026-01-12T01:28:19.023502","2026-01-13T01:28:19.023508","2026-01-14T01:28:19.023513","2026-01-15T01:28:19.023519","2026-01-16T01:28:19.023525","2026-01-17T01:28:19.023532","2026-01-18T01:28:19.023538","2026-01-19T01:28:19.023543","2026-01-20T01:28:19.023547","2026-01-21T01:28:19.023551","2026-01-22T01:28:19.023555","2026-01-23T01:28:19.023559","2026-01-24T01:28:19.023563","2026-01-25T01:28:19.023567","2026-01-26T01:28:19.023571","2026-01-27T01:28:19.023575","2026-01-28T01:28:19.023579","2026-01-29T01:28:19.023584","2026-01-30T01:28:19.023587","2026-01-31T01:28:19.023596","2026-02-01T01:28:19.023603","2026-02-02T01:28:19.023607","2026-02-03T01:28:19.023611","2026-02-04T01:28:19.023615","2026-02-05T01:28:19.023621","2026-02-06T01:28:19.023626","2026-02-07T01:28:19.023630","2026-02-08T01:28:19.023634","2026-02-09T01:28:19.023639","2026-02-10T01:28:19.023643","2026-02-11T01:28:19.023647","2026-02-12T01:28:19.023651","2026-02-13T01:28:19.023655","2026-02-14T01:28:19.023659","2026-02-15T01:28:19.023663","2026-02-16T01:28:19.023667","2026-02-17T01:28:19.023670","2026-02-18T01:28:19.023675","2026-02-19T01:28:19.023678","2026-02-20T01:28:19.023682","2026-02-21T01:28:19.023686","2026-02-22T01:28:19.023691","2026-02-23T01:28:19.023694","2026-02-24T01:28:19.023700"],"y":{"dtype":"f8","bdata":"AAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAmvPsmqC77L\u002fGsqeLCLnov6QZ4EChgdi\u002fAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgJPEANhQnOu\u002fAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAyn01nibm4r+fD0VD\u002fAEDwH9tas\u002fJdATA1DA5LDvz+78eq7ebckgDwCbbOZm+egHA1BatXrj4AMCET2euOD\u002f1v18wPpRWL+i\u002fCFUMhESW7r+zNasXLqLzvzMMSqsXDvK\u002fAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAeFbTIGhb678XKxYXONnpvwAAAAAAAACAAAAAAAAAAIBXqDbJuf\u002fHvwAAAAAAAACAlEgOqFumw7+DVPwue6Lbv6tgvs8+fte\u002fMcJttW6p4L8AAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgBjBWVblR+C\u002fAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACANphgrYqc+b+1eew4Rt7nv0fIHqfHR+6\u002flCwqNS\u002fU5L94UNpAMizmvwAAAAAAAACAAAAAAAAAAIAHEyKFNC3mvwAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAh7nJlrw+e\u002fAAAAAAAAAIBx0uWdQrfwvwAAAAAAAACAAAAAAAAAAIBKf\u002fuRQ1rmv5hiCFnoZs+\u002fwY8MjJnC278AAAAAAAAAgAAAAAAAAACAAAAAAAAAAICVd2okiwDjvwAAAAAAAACAU+\u002fLMx2n0L8AAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgBqQ6lEETfG\u002fkBpD+6iF4b8AAAAAAAAAgAAAAAAAAACA"},"type":"scatter"}],"layout":{"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"font":{"color":"#c9d1d9"},"xaxis":{"gridcolor":"#30363d","zeroline":false},"yaxis":{"gridcolor":"#30363d","zeroline":false,"ticksuffix":"%"},"legend":{"bgcolor":"#161b22","bordercolor":"#30363d","borderwidth":1},"margin":{"l":50,"r":20,"t":50,"b":40},"title":{"text":"Drawdown (%)","font":{"color":"#f85149"}},"plot_bgcolor":"#0d1117","paper_bgcolor":"#161b22","height":180}};
+const pie  = {"data":[{"hole":0.5,"labels":["RSI_Bollinger","MACD_Momentum","EMA_Crossover","Breakout","ML_Adaptive"],"marker":{"colors":["#58a6ff","#3fb950","#f85149","#d29922","#bc8cff"]},"textfont":{"color":"#c9d1d9"},"values":[2000.0,2000.0,2000.0,2000.0,2000.0],"type":"pie"}],"layout":{"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"font":{"color":"#c9d1d9"},"xaxis":{"gridcolor":"#30363d","zeroline":false},"yaxis":{"gridcolor":"#30363d","zeroline":false},"legend":{"bgcolor":"#161b22","bordercolor":"#30363d","borderwidth":1},"margin":{"l":50,"r":20,"t":50,"b":40},"title":{"text":"Capital Allocation","font":{"color":"#d29922"}},"plot_bgcolor":"#0d1117","paper_bgcolor":"#161b22","height":320,"showlegend":true}};
+const hist = {"data":[{"marker":{"color":["#3fb950","#f85149","#3fb950","#f85149","#f85149","#3fb950","#3fb950","#f85149","#3fb950","#f85149","#3fb950","#3fb950","#f85149","#f85149","#f85149","#3fb950","#f85149","#3fb950","#3fb950","#3fb950","#3fb950","#3fb950","#3fb950","#f85149","#3fb950","#f85149","#3fb950","#3fb950","#3fb950","#3fb950","#3fb950","#3fb950","#f85149","#f85149","#3fb950","#f85149","#3fb950","#f85149","#3fb950","#f85149","#3fb950","#f85149","#3fb950","#3fb950","#3fb950","#3fb950","#3fb950","#f85149","#3fb950","#f85149","#f85149","#3fb950","#f85149","#f85149","#f85149","#f85149","#3fb950","#f85149","#f85149","#3fb950","#3fb950","#3fb950","#3fb950","#3fb950","#f85149","#f85149","#f85149","#3fb950","#f85149","#3fb950","#f85149","#3fb950","#f85149","#3fb950","#3fb950","#3fb950","#3fb950","#f85149","#f85149","#3fb950"]},"nbinsx":30,"opacity":0.85,"x":{"dtype":"f8","bdata":"AA+EqaVqKkBfoKSovAz7v0JL2G88UBFAsADjddaU+r9OgvJ6f4H0v53tZaH00BBARmwNRL7JFUDSHiwZJ28MwJ+A\u002fNeJwyNAD5vDQxopIcBzZVLJ0xYuQIM4sxrYFyhASzZNdB0KHsBTpRpmpOn3v5ZUNEfyi\u002f6\u002fOB1s2PB9LEAy+63GpPcKwEHsGj4ebB1An3qPFM++FEAwHO8uyQYnQMODhA3pSARAaIpPrLNDFkD22yfjFcgtQHnPVvQNzQ3APiYC7VkEGUDpnW25HfcWwFymtYMTJxVA0lbzT2zAIED0Sn8k+54AQOX+LMHkASFA7j7a6X0nJUAaL0MhxYMWQAndcbe6th3AVUHntEt3FMA5OkY26bgYQDyQXslShBbAj0iY22GQJkALM\u002fv\u002fyTscwG2r\u002fwdm1QVAVRzawBaiI8B9wj3XbGURQKOuaIUAxRzAmhhl5ebOK0AKXRWnILkHQCvtm4ssNCtAf3twqtuWJEANk1Mwk7UmQHd1oi\u002fxnQDAVpSqqUlWJ0BIDOLG8RgQwJBr9k8Q8x7AFkUQRtNJKEBvLijozb4jwDVB41yHwx3AxaKzHaGqIsCWIkFGx\u002fUIwOf7+mHuGRlAT8S3C2ddH8CIKFasd9IdwJh+BeY+IiZAOezliHMHGUBjVGBca+ckQHSiCMe1FxdAQJDZCSPGJUB8cIrzNA4OwGUZGDgcS\u002fS\u002fzniDYj2JCcAYwp+hvjsDQHzN2sxuHfG\u002fBmLaE984IUASb08mmx4HwCY7NVHCjyFAoe9yaIo2GsAk0G4VrEEmQHhX2WodVCBAgOFcJZ31GkCMbCgVKdksQO4GSsNfOiLA3S7Q3mYYG8CtFuR7FVolQA=="},"type":"histogram"}],"layout":{"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"font":{"color":"#c9d1d9"},"xaxis":{"gridcolor":"#30363d","zeroline":false,"title":{"text":"P&L ($)"}},"yaxis":{"gridcolor":"#30363d","zeroline":false,"title":{"text":"Trades"}},"legend":{"bgcolor":"#161b22","bordercolor":"#30363d","borderwidth":1},"margin":{"l":50,"r":20,"t":50,"b":40},"title":{"text":"P&L Distribution","font":{"color":"#58a6ff"}},"plot_bgcolor":"#0d1117","paper_bgcolor":"#161b22","height":230}};
+const cum  = {"data":[{"fill":"tozeroy","fillcolor":"rgba(88,166,255,0.10)","line":{"color":"#58a6ff","width":2},"x":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79],"y":{"dtype":"f8","bdata":"bav\u002fB2bVBUBeiSRDXY36P8QPao7qcylAn4FmY7fwG0Cil6YByLguQLwG91YYnx9AbFwQujei9T++JzEmELspQF4Z28TrIxFAZLLETmz9BEBkIKqszN3mPxzn2hCwtylA2bn62W7fLUCnQPqzE4MfQL+GzDLbejVAG9PcE00HQEBoxGaJw89CQJhgEi53LkZAQTkYG5gkRUAWZOf3SmVEQEJOOueqzEBAE6Sr8TxIQkAoSRZczx1IQJsR7oU7hUZAGHEtUnmoSUA6bUc8NdxKQImE2vSMMUZAzgIIBPWiQUDM+dF8+hRJQFWnU0UyzktAUle3Pdd2UUBweyOGHhlSQFty8UtwUVFAbhWeKE3LVECW8RH2o+FVQI0nJvidj1VASKtqh8eZU0DM9McXX6tSQKmU7a+by1RA247o8sFTUkC17f480WBTQKQYWupUa1VAWJ1XsViAVkDqqvzTfRtaQNd2Ll5FP1hA36hpvwn4WkAg9eShJR9dQDLy9zOfbVtAsV9VQWwBW0Cc6waG97lZQCNw1KwCAVlAH4c+gL2YV0C5Jl4PkUdXQH2F7EcI2FhAIelQ25ZjWkBcyOK+B2JZQL467SS6OFxAI+ITb7JqXkBJct5I9ZJdQK\u002fMGYFm5V5AD+4z+yC8YEBNxGUn6ENgQMlqVKNkrF5A0gmLauvIXUBUxgMNFzpgQM3fDTY17mBA\u002f\u002fB1BVi2YUCHJCGH1TdjQMKCExu0\u002fWFAxG9q3M5hY0DON+p5B55kQHKEavdupmNAYsUCUhlNZUC565eOhi5nQEJwUayMl2hAiHUXYgPmaUCcuk8QwZ5qQP6RQAIiimtA0w3lehgwbEAhpEKPxz9rQA=="},"type":"scatter"}],"layout":{"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"font":{"color":"#c9d1d9"},"xaxis":{"gridcolor":"#30363d","zeroline":false,"title":{"text":"Trade #"}},"yaxis":{"gridcolor":"#30363d","zeroline":false,"tickprefix":"$"},"legend":{"bgcolor":"#161b22","bordercolor":"#30363d","borderwidth":1},"margin":{"l":50,"r":20,"t":50,"b":40},"title":{"text":"Cumulative Realized P&L","font":{"color":"#58a6ff"}},"plot_bgcolor":"#0d1117","paper_bgcolor":"#161b22","height":230}};
+const cfg  = {responsive:true,displayModeBar:false};
+
+Plotly.newPlot('chart-eq',  eq.data,   eq.layout,   cfg);
+Plotly.newPlot('chart-dd',  dd.data,   dd.layout,   cfg);
+Plotly.newPlot('chart-pie', pie.data,  pie.layout,  cfg);
+Plotly.newPlot('chart-hist',hist.data, hist.layout, cfg);
+Plotly.newPlot('chart-cum', cum.data,  cum.layout,  cfg);
+
+</script>
+</body>
+</html>

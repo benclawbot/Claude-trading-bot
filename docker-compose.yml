@@ -1,0 +1,26 @@
+# Docker Compose for BTC Trading Bot
+# Run: docker-compose up -d
+
+version: '3.8'
+
+services:
+  trading-bot:
+    build: .
+    container_name: btc-trading-bot
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./trading_bot.db:/app/trading_bot.db
+      - ./models:/app/models
+      - ./trading_bot.log:/app/trading_bot.log
+    ports:
+      - "8050:8050"
+
+  # Optional: Prometheus metrics exporter
+  # metrics-exporter:
+  #   image: prom/node-exporter
+  #   container_name: bot-metrics
+  #   ports:
+  #     - "9100:9100"

@@ -1,0 +1,218 @@
+================================================================================
+AUTO-FIX TEST SCRIPT - QUICK START
+================================================================================
+
+🚀 ONE-COMMAND USAGE
+================================================================================
+
+To test and auto-fix everything in one command:
+
+    python test_portfolio_integrity_autofix.py
+
+That's it! The script will:
+  ✓ Test all portfolio calculations
+  ✓ Auto-fix any issues found
+  ✓ Create backups of modified files
+  ✓ Report what was fixed
+  ✓ Tell you if everything is OK
+
+Expected output: "✓ ALL TESTS PASSED - Portfolio is ready to use!"
+
+================================================================================
+WHAT HAPPENS IF TESTS FAIL?
+================================================================================
+
+Example: Test finds missing method parameter
+
+  BEFORE AUTO-FIX:
+  ✗ FAIL: Signature error
+  Error: reallocate() missing required parameter
+
+  AFTER AUTO-FIX (Automatic):
+  Fixing: Update reallocate() method signature
+  File: portfolio_manager.py
+  Backup created: portfolio_manager.py.backup_20260226_143022
+  ✓ Fixed successfully
+
+The script automatically:
+1. Identifies the problem
+2. Backs up the file
+3. Applies the fix
+4. Shows you what changed
+
+================================================================================
+BACKUP SYSTEM
+================================================================================
+
+Every fix is protected:
+  • Original file backed up BEFORE any changes
+  • Backup has timestamp: filename.backup_YYYYMMDD_HHMMSS
+  • Easy to restore if needed
+
+To restore from backup:
+  cp portfolio_manager.py.backup_20260226_143022 portfolio_manager.py
+
+================================================================================
+WHEN TO USE WHAT
+================================================================================
+
+Need to: AUTO-FIX EVERYTHING
+  Command: python test_portfolio_integrity_autofix.py
+  Use when: You want automatic fixes
+
+Need to: JUST CHECK STATUS
+  Command: python test_portfolio_integrity_autofix.py --no-fix
+  Use when: You only want to see if there are issues
+
+Need to: REVIEW BEFORE FIXING
+  Command: python test_portfolio_integrity_autofix.py --no-fix
+           # Review output...
+           python test_portfolio_integrity_autofix.py
+  Use when: You want to see issues before they're fixed
+
+================================================================================
+AFTER RUNNING AUTO-FIX
+================================================================================
+
+1. Check the output - look for:
+   - Number of tests passed
+   - Files that were modified
+   - Backup locations
+
+2. Review changes (optional):
+   - Diff the modified file: diff portfolio_manager.py portfolio_manager.py.backup_*
+   - See what changed in the backup
+
+3. Restart the bot:
+   python main.py
+
+4. Test in dashboard - verify:
+   - Strategy metrics show correct totals
+   - Capital values are reasonable
+   - Unrealized P&L updates live
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Q: What if the auto-fix breaks something?
+A: You have backups! Just restore:
+   cp portfolio_manager.py.backup_20260226_143022 portfolio_manager.py
+
+Q: What if I don't want backups?
+A: They're harmless - just delete them:
+   rm *.backup_*
+
+Q: Will it modify my database?
+A: No! Only code files are modified. Database stays untouched.
+
+Q: Can I undo changes?
+A: Yes! Use the backup files (saved automatically).
+
+Q: What if I want to see what would be fixed first?
+A: Run with --no-fix flag:
+   python test_portfolio_integrity_autofix.py --no-fix
+
+================================================================================
+INTEGRATION WITH WORKFLOW
+================================================================================
+
+OPTION 1: Manual Testing
+  1. python test_portfolio_integrity_autofix.py
+  2. Review output
+  3. python main.py
+  4. Check dashboard
+
+OPTION 2: Automated
+  1. Add to startup script
+  2. Run: python test_portfolio_integrity_autofix.py
+  3. If passes (exit code 0), run: python main.py
+  4. If fails (exit code 1), alert and stop
+
+OPTION 3: Regular Health Checks
+  1. Schedule daily: python test_portfolio_integrity_autofix.py --no-fix
+  2. Get email report of status
+  3. Fix issues manually as needed
+
+================================================================================
+BACKUP MANAGEMENT
+================================================================================
+
+Find all backups:
+  ls -lh *.backup_*
+  ls -lh portfolio_manager.py.backup_*
+
+Clean up old backups:
+  rm *.backup_202601*    # Delete January backups
+  rm *.backup_202602*    # Delete February backups
+
+Keep recent only:
+  ls -t *.backup_* | tail -n +4 | xargs rm  # Keep 3 newest
+
+================================================================================
+EXAMPLE RUN
+================================================================================
+
+$ python test_portfolio_integrity_autofix.py
+
+══════════════════════════════════════════════════════════════════════
+PORTFOLIO MANAGER - TEST SUITE WITH AUTO-FIX
+══════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════
+TEST 1: Capital Calculation Consistency
+══════════════════════════════════════════════════════════════════════
+✓ PASS: Capital values are consistent
+
+══════════════════════════════════════════════════════════════════════
+TEST 2: Reallocate Method Signature
+══════════════════════════════════════════════════════════════════════
+✓ PASS: reallocate() accepts current_price parameter
+
+══════════════════════════════════════════════════════════════════════
+TEST 3: _allocate_capital Method Signature
+══════════════════════════════════════════════════════════════════════
+✓ PASS
+✓ PASS
+
+══════════════════════════════════════════════════════════════════════
+TEST 4: Dashboard Calculations
+══════════════════════════════════════════════════════════════════════
+✓ Found: true_total_cap calculation
+✓ Found: correct formula
+✓ Found: display of true_total_cap
+✓ PASS: Dashboard calculations are correct
+
+══════════════════════════════════════════════════════════════════════
+TEST RESULTS SUMMARY
+══════════════════════════════════════════════════════════════════════
+✓ PASS: Capital Consistency
+✓ PASS: Reallocate Signature
+✓ PASS: Allocate Capital Signature
+✓ PASS: Dashboard Calculations
+
+Score: 4/4 tests passed
+
+No fixes needed!
+
+══════════════════════════════════════════════════════════════════════
+✓ ALL TESTS PASSED - Portfolio is ready to use!
+══════════════════════════════════════════════════════════════════════
+
+================================================================================
+YOU'RE DONE!
+================================================================================
+
+Your portfolio tool is tested and ready to go!
+
+Next steps:
+  1. Start the bot: python main.py
+  2. Open dashboard in browser
+  3. Monitor trading activity
+
+For detailed documentation:
+  - TEST_AUTOFIX_GUIDE.md - Full reference guide
+  - PORTFOLIO_FIXES_SUMMARY.md - Technical details
+  - PORTFOLIO_DEBUG_GUIDE.md - Troubleshooting
+
+================================================================================
