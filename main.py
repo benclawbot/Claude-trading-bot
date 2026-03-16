@@ -410,6 +410,18 @@ def main():
             shutil.copy(example, env_path)
             logger.info("Created .env from .env.example")
 
+    # ─── Handle data reset if configured ───────────────────────────────────────
+    if config.RESET_ON_STARTUP:
+        logger.warning("RESET_ON_STARTUP is enabled - clearing all trading data!")
+        db.clear_old_data()
+        logger.info("All trading data cleared. Starting fresh.")
+    else:
+        # Set live_since if not already set
+        db.set_live_since()
+        live_since = db.get_live_since()
+        if live_since:
+            logger.info(f"Live trading since: {live_since}")
+
     try:
         bot = TradingBot()
         bot.run()

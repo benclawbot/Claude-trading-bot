@@ -179,7 +179,7 @@ def update_kpis(_):
     total_pnl = real + unreal
     pct_chg   = (total_pnl / config.INITIAL_CAPITAL) * 100 if config.INITIAL_CAPITAL else 0
 
-    stats   = db.get_trade_stats()
+    stats   = db.get_trade_stats(include_backtest=config.SHOW_BACKTEST_DATA)
     wins    = int(stats.get("wins") or 0)
     total_t = int(stats.get("total_trades") or 0)
     wr_str  = f"{wins}/{total_t}" if total_t > 0 else "0/0"
@@ -203,6 +203,15 @@ def update_kpis(_):
         dbc.Col(_metric_card("Open Positions", str(len(db.get_open_positions())),
                              color="blue"), width=2),
     ]
+    
+    # Add "Live Since" card if available
+    live_since = db.get_live_since()
+    if live_since:
+        # Extract just the date
+        live_since_date = live_since.split("T")[0] if "T" in live_since else live_since
+        cards.append(dbc.Col(_metric_card("Live Since", live_since_date,
+                             color="purple"), width=2))
+    
     return cards, bal
 
 
@@ -228,7 +237,8 @@ def render_tab(active_tab, _):
 # ─── Tab renderers ────────────────────────────────────────────────────────────
 
 def _render_overview():
-    history = db.get_balance_history(days=90)
+    # Get balance history - filter out backtest data based on config
+    history = db.get_balance_history(days=90, include_backtest=config.SHOW_BACKTEST_DATA)
     if history:
         df = pd.DataFrame(history)
         fig = go.Figure()
@@ -302,7 +312,7 @@ def _render_strategies():
 
     for i, strat in enumerate(strategies):
         name  = strat["name"]
-        stats = db.get_trade_stats(name)
+        stats = db.get_trade_stats(name, include_backtest=config.SHOW_BACKTEST_DATA)
         db_capital = strat.get("capital", 0)  # Free capital from DB
         wr    = float(stats.get("win_rate") or 0)
         realized_pnl = float(stats.get("total_pnl") or 0)
@@ -482,7 +492,8 @@ def _render_positions():
 
 
 def _render_history():
-    trades = db.get_trades(limit=200)
+    # Get trades - filter out backtest data based on config
+    trades = db.get_trades(limit=200, include_backtest=config.SHOW_BACKTEST_DATA)
     if not trades:
         return html.Div("No closed trades yet.", style={"color": COLORS["subtext"], "padding": "20px"})
 
@@ -561,7 +572,8 @@ def _render_history():
 
 
 def _render_journal():
-    entries = db.get_journal_entries(limit=50)
+    # Get journal entries - filter out backtest entries based on config
+    entries = db.get_journal_entries(limit=50, include_backtest=config.SHOW_BACKTEST_DATA)
     if not entries:
         return html.Div("No journal entries yet. Entries are created after each closed trade.",
                         style={"color": COLORS["subtext"], "padding": "20px"})

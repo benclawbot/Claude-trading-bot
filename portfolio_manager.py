@@ -371,15 +371,16 @@ class PortfolioManager:
                 "current_price": current_price,
             }
 
-        total_free  = sum(self._capital.get(s, 0) for s in self.strategies if self.strategies[s].is_active)
-        total_bal   = total_free + unrealized + sum(
-            float(p["entry_price"]) * float(p["quantity"])
-            for p in db.get_open_positions()
+        # Total balance = sum of all strategy totals (which includes free capital + committed + unrealized)
+        # No need to add open positions notional again - it's already included in breakdown
+        total_bal = sum(
+            breakdown[s]["capital"] 
+            for s in breakdown
         )
 
         return {
             "total_balance": round(total_bal, 2),
-            "free_capital": round(total_free, 2),
+            "free_capital": round(sum(b["free_capital"] for b in breakdown.values()), 2),
             "unrealized_pnl": round(unrealized, 2),
             "realized_pnl": round(realized_sum, 2),
             "breakdown": breakdown,

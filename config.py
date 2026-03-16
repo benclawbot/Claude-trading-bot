@@ -70,6 +70,15 @@ DASHBOARD_UPDATE_MS = 10000   # refresh every 10 seconds
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE  = os.path.join(os.path.dirname(__file__), "trading_bot.log")
 
+# ─── Data Management ────────────────────────────────────────────────────────────
+# Set to "true" to clear all trading data on startup and start fresh
+# This is useful when you want to reset the bot and not show old backtest data
+RESET_ON_STARTUP = os.getenv("RESET_ON_STARTUP", "false").lower() == "true"
+
+# Set to "true" to include backtest data in dashboards (for debugging)
+# Default is false - only live trading data is shown
+SHOW_BACKTEST_DATA = os.getenv("SHOW_BACKTEST_DATA", "false").lower() == "true"
+
 # ─── Strategy Parameters (defaults; self-learning engine may override) ──────────
 STRATEGY_PARAMS = {
     "EMA5_Momentum": {

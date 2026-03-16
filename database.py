@@ -3,6 +3,9 @@
 Changes:
   - Added utc_now and utc_now_iso utility for timezone-aware datetime handling
   - Replaced deprecated datetime.utcnow() calls
+  - Added is_backtest column to trades table to distinguish backtest from live trades
+  - Added live_since tracking to know when real trading started
+  - Added clear_old_data function to reset database
 """
 
 import sqlite3
@@ -75,7 +78,8 @@ def init_db():
             duration_hours  REAL NOT NULL,
             exit_reason     TEXT,               -- TAKE_PROFIT, STOP_LOSS, SIGNAL, MANUAL
             entry_features  TEXT DEFAULT '{}',  -- JSON of indicator values at entry
-            closed_at       TEXT DEFAULT (datetime('now'))
+            closed_at       TEXT DEFAULT (datetime('now')),
+            is_backtest    INTEGER DEFAULT 0   -- 0=live trade, 1=backtest (not shown in history)
         );
 
         CREATE TABLE IF NOT EXISTS journal_entries (
@@ -129,9 +133,78 @@ def init_db():
         );
     """)
     conn.commit()
+    
+    # ─── Database migrations ──────────────────────────────────────────────────
+    # Add is_backtest column if it doesn't exist (for existing databases)
+    try:
+        conn.execute("SELECT is_backtest FROM trades LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE trades ADD COLUMN is_backtest INTEGER DEFAULT 0")
+        conn.commit()
+    
+    # Add live_since table if it doesn't exist
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS bot_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
 
 
-# ─── Strategy helpers ─────────────────────────────────────────────────────────
+def clear_old_data():
+    """
+    Clear all trading data to start fresh.
+    Use this when you want to reset the bot and start new.
+    """
+    conn = get_conn()
+    
+    # Delete all trades (keep strategies)
+    conn.execute("DELETE FROM trades")
+    
+    # Delete all positions
+    conn.execute("DELETE FROM positions")
+    
+    # Delete all journal entries
+    conn.execute("DELETE FROM journal_entries")
+    
+    # Delete all balance history
+    conn.execute("DELETE FROM balance_history")
+    
+    # Delete all ML features
+    conn.execute("DELETE FROM ml_features")
+    
+    # Delete all performance history
+    conn.execute("DELETE FROM strategy_performance")
+    
+    # Update live_since to now
+    conn.execute("""
+        INSERT OR REPLACE INTO bot_metadata (key, value, updated_at)
+        VALUES ('live_since', ?, datetime('now'))
+    """, (utc_now_iso(),))
+    
+    conn.commit()
+
+
+def get_live_since() -> Optional[str]:
+    """Get the date when live trading started."""
+    row = get_conn().execute(
+        "SELECT value FROM bot_metadata WHERE key='live_since'"
+    ).fetchone()
+    return row[0] if row else None
+
+
+def set_live_since():
+    """Set the live trading start date if not already set."""
+    existing = get_live_since()
+    if not existing:
+        conn = get_conn()
+        conn.execute("""
+            INSERT OR REPLACE INTO bot_metadata (key, value, updated_at)
+            VALUES ('live_since', ?, datetime('now'))
+        """, (utc_now_iso(),))
+        conn.commit()
 
 def upsert_strategy(name: str, capital: float, params: dict,
                     backtest_cagr: float = 0.0, backtest_win_rate: float = 0.0,
@@ -232,32 +305,53 @@ def record_trade(strategy_name: str, symbol: str, side: str,
                  entry_price: float, exit_price: float, quantity: float,
                  pnl: float, pnl_pct: float, fees_paid: float,
                  entry_time: str, exit_time: str, duration_hours: float,
-                 exit_reason: str, entry_features: dict = None) -> int:
+                 exit_reason: str, entry_features: dict = None,
+                 is_backtest: bool = False) -> int:
+    """Record a trade. Set is_backtest=True for backtest trades (not shown in history)."""
     conn = get_conn()
     cursor = conn.execute("""
         INSERT INTO trades
         (strategy_name, symbol, side, entry_price, exit_price, quantity,
          pnl, pnl_pct, fees_paid, entry_time, exit_time, duration_hours,
-         exit_reason, entry_features)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         exit_reason, entry_features, is_backtest)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (strategy_name, symbol, side, entry_price, exit_price, quantity,
           pnl, pnl_pct, fees_paid, entry_time, exit_time, duration_hours,
-          exit_reason, json.dumps(entry_features or {})))
+          exit_reason, json.dumps(entry_features or {}), 1 if is_backtest else 0))
     conn.commit()
     return cursor.lastrowid
 
 
-def get_trades(strategy_name: str = None, limit: int = 500) -> List[Dict]:
+def get_trades(strategy_name: str = None, limit: int = 500, include_backtest: bool = False) -> List[Dict]:
+    """
+    Get trades from the database.
+    
+    Args:
+        strategy_name: Filter by strategy (optional)
+        limit: Maximum number of trades to return
+        include_backtest: If False (default), exclude backtest trades
+    """
     conn = get_conn()
     if strategy_name:
-        rows = conn.execute(
-            "SELECT * FROM trades WHERE strategy_name=? ORDER BY closed_at DESC LIMIT ?",
-            (strategy_name, limit)
-        ).fetchall()
+        if include_backtest:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE strategy_name=? ORDER BY closed_at DESC LIMIT ?",
+                (strategy_name, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE strategy_name=? AND is_backtest=0 ORDER BY closed_at DESC LIMIT ?",
+                (strategy_name, limit)
+            ).fetchall()
     else:
-        rows = conn.execute(
-            "SELECT * FROM trades ORDER BY closed_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        if include_backtest:
+            rows = conn.execute(
+                "SELECT * FROM trades ORDER BY closed_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE is_backtest=0 ORDER BY closed_at DESC LIMIT ?", (limit,)
+            ).fetchall()
     result = []
     for row in rows:
         d = dict(row)
@@ -266,11 +360,25 @@ def get_trades(strategy_name: str = None, limit: int = 500) -> List[Dict]:
     return result
 
 
-def get_trade_stats(strategy_name: str = None) -> Dict:
+def get_trade_stats(strategy_name: str = None, include_backtest: bool = False) -> Dict:
+    """Get trade statistics. Excludes backtest trades by default."""
     conn = get_conn()
-    where = "WHERE strategy_name=?" if strategy_name else ""
-    params = (strategy_name,) if strategy_name else ()
-    row = conn.execute(f"""
+    if strategy_name:
+        if include_backtest:
+            where = "WHERE strategy_name=?"
+            params = (strategy_name,)
+        else:
+            where = "WHERE strategy_name=? AND is_backtest=0"
+            params = (strategy_name,)
+    else:
+        if include_backtest:
+            where = ""
+            params = ()
+        else:
+            where = "WHERE is_backtest=0"
+            params = ()
+    
+    query = f"""
         SELECT
             COUNT(*) as total_trades,
             SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
@@ -282,7 +390,8 @@ def get_trade_stats(strategy_name: str = None) -> Dict:
             AVG(duration_hours) as avg_duration_hours,
             SUM(fees_paid) as total_fees
         FROM trades {where}
-    """, params).fetchone()
+    """
+    row = conn.execute(query, params).fetchone()
     if row:
         d = dict(row)
         d["win_rate"] = (d["wins"] / d["total_trades"]) if d["total_trades"] > 0 else 0
@@ -311,17 +420,35 @@ def record_journal_entry(trade_id: int, strategy_name: str,
     conn.commit()
 
 
-def get_journal_entries(strategy_name: str = None, limit: int = 100) -> List[Dict]:
+def get_journal_entries(strategy_name: str = None, limit: int = 100, include_backtest: bool = False) -> List[Dict]:
+    """Get journal entries. Excludes entries for backtest trades by default."""
     conn = get_conn()
     if strategy_name:
-        rows = conn.execute(
-            "SELECT * FROM journal_entries WHERE strategy_name=? ORDER BY created_at DESC LIMIT ?",
-            (strategy_name, limit)
-        ).fetchall()
+        if include_backtest:
+            rows = conn.execute(
+                "SELECT * FROM journal_entries WHERE strategy_name=? ORDER BY created_at DESC LIMIT ?",
+                (strategy_name, limit)
+            ).fetchall()
+        else:
+            # Join with trades to filter out backtest trades
+            rows = conn.execute("""
+                SELECT j.* FROM journal_entries j
+                JOIN trades t ON j.trade_id = t.id
+                WHERE j.strategy_name=? AND t.is_backtest=0
+                ORDER BY j.created_at DESC LIMIT ?
+            """, (strategy_name, limit)).fetchall()
     else:
-        rows = conn.execute(
-            "SELECT * FROM journal_entries ORDER BY created_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        if include_backtest:
+            rows = conn.execute(
+                "SELECT * FROM journal_entries ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT j.* FROM journal_entries j
+                JOIN trades t ON j.trade_id = t.id
+                WHERE t.is_backtest=0
+                ORDER BY j.created_at DESC LIMIT ?
+            """, (limit,)).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -338,13 +465,33 @@ def record_balance(total_balance: float, realized_pnl: float,
     conn.commit()
 
 
-def get_balance_history(days: int = 30) -> List[Dict]:
+def get_balance_history(days: int = 30, include_backtest: bool = False) -> List[Dict]:
+    """
+    Get balance history for equity curve.
+    
+    Args:
+        days: Number of days to look back
+        include_backtest: If False (default), only return data from when live trading started
+    """
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT * FROM balance_history
-        WHERE recorded_at >= datetime('now', ? || ' days')
-        ORDER BY recorded_at ASC
-    """, (f"-{days}",)).fetchall()
+    
+    # Get live_since date if we should filter
+    live_since = None if include_backtest else get_live_since()
+    
+    if live_since:
+        # Filter to only include data from live trading start
+        rows = conn.execute("""
+            SELECT * FROM balance_history
+            WHERE recorded_at >= ?
+            ORDER BY recorded_at ASC
+        """, (live_since,)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT * FROM balance_history
+            WHERE recorded_at >= datetime('now', ? || ' days')
+            ORDER BY recorded_at ASC
+        """, (f"-{days}",)).fetchall()
+    
     result = []
     for row in rows:
         d = dict(row)
