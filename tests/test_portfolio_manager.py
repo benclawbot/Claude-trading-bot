@@ -259,6 +259,96 @@ class TestPortfolioManager:
         
         assert result == True
 
+    @patch("portfolio_manager.db")
+    @patch("portfolio_manager.BinanceClient")
+    @patch("portfolio_manager.config")
+    def test_experiment_lane_cap_blocks_entry_when_cap_reached(self, mock_config, mock_binance_cls, mock_db):
+        """Block entries for lane strategies when lane allocation cap is already consumed."""
+        mock_config.INITIAL_CAPITAL = 10000
+        mock_config.MAX_STRATEGIES = 7
+        mock_config.MAX_POSITION_PCT = 0.35
+        mock_config.TRADING_FEE = 0.001
+        mock_config.SLIPPAGE = 0.0003
+        mock_config.DEFAULT_STOP_LOSS_PCT = 0.025
+        mock_config.DEFAULT_TAKE_PROFIT_PCT = 0.055
+        mock_config.SYMBOL = "BTCUSDT"
+        mock_config.MAX_OPEN_POSITIONS_PER_STRATEGY = 2
+        mock_config.MAX_PORTFOLIO_DRAWDOWN_PCT = 0.20
+        mock_config.MIN_POSITION_PCT = 0.05
+        mock_config.CONFIDENCE_THRESHOLD = 0.40
+        mock_config.EXPERIMENT_LANE_ENABLED = True
+        mock_config.EXPERIMENT_LANE_CAP_PCT = 0.30
+        mock_config.EXPERIMENT_LANE_STRATEGIES = {"MACD_Momentum"}
+
+        mock_db.get_trade_stats.return_value = {"total_pnl": 0}
+        mock_db.get_open_positions.return_value = []
+        mock_db.update_strategy_capital = Mock()
+
+        from portfolio_manager import PortfolioManager
+        from strategies.base_strategy import Signal, SignalType
+
+        core = MockStrategy("Residual_MeanRev", capital=0, is_active=True)
+        lane = MockStrategy("MACD_Momentum", capital=0, is_active=True)
+        mock_client = MagicMock()
+
+        with patch.object(PortfolioManager, '_allocate_capital'):
+            pm = PortfolioManager(mock_client, [core, lane])
+
+        # Total allocation = 1000, lane allocation = 400 > 30% cap (300)
+        pm._capital["Residual_MeanRev"] = 600
+        pm._capital["MACD_Momentum"] = 400
+        pm._peak_capital["MACD_Momentum"] = 400
+
+        signal = Signal(SignalType.BUY, confidence=0.7)
+        result = pm._risk_check("MACD_Momentum", signal, ml_confidence=0.7)
+
+        assert result is False
+
+    @patch("portfolio_manager.db")
+    @patch("portfolio_manager.BinanceClient")
+    @patch("portfolio_manager.config")
+    def test_experiment_lane_cap_allows_entry_when_below_cap(self, mock_config, mock_binance_cls, mock_db):
+        """Allow lane entries when allocation remains below configured cap."""
+        mock_config.INITIAL_CAPITAL = 10000
+        mock_config.MAX_STRATEGIES = 7
+        mock_config.MAX_POSITION_PCT = 0.35
+        mock_config.TRADING_FEE = 0.001
+        mock_config.SLIPPAGE = 0.0003
+        mock_config.DEFAULT_STOP_LOSS_PCT = 0.025
+        mock_config.DEFAULT_TAKE_PROFIT_PCT = 0.055
+        mock_config.SYMBOL = "BTCUSDT"
+        mock_config.MAX_OPEN_POSITIONS_PER_STRATEGY = 2
+        mock_config.MAX_PORTFOLIO_DRAWDOWN_PCT = 0.20
+        mock_config.MIN_POSITION_PCT = 0.05
+        mock_config.CONFIDENCE_THRESHOLD = 0.40
+        mock_config.EXPERIMENT_LANE_ENABLED = True
+        mock_config.EXPERIMENT_LANE_CAP_PCT = 0.30
+        mock_config.EXPERIMENT_LANE_STRATEGIES = {"MACD_Momentum"}
+
+        mock_db.get_trade_stats.return_value = {"total_pnl": 0}
+        mock_db.get_open_positions.return_value = []
+        mock_db.update_strategy_capital = Mock()
+
+        from portfolio_manager import PortfolioManager
+        from strategies.base_strategy import Signal, SignalType
+
+        core = MockStrategy("Residual_MeanRev", capital=0, is_active=True)
+        lane = MockStrategy("MACD_Momentum", capital=0, is_active=True)
+        mock_client = MagicMock()
+
+        with patch.object(PortfolioManager, '_allocate_capital'):
+            pm = PortfolioManager(mock_client, [core, lane])
+
+        # Total allocation = 1000, lane allocation = 200 < 30% cap (300)
+        pm._capital["Residual_MeanRev"] = 800
+        pm._capital["MACD_Momentum"] = 200
+        pm._peak_capital["MACD_Momentum"] = 200
+
+        signal = Signal(SignalType.BUY, confidence=0.7)
+        result = pm._risk_check("MACD_Momentum", signal, ml_confidence=0.7)
+
+        assert result is True
+
 
 class TestPositionSizing:
     """Test position sizing logic."""

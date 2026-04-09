@@ -34,6 +34,18 @@ MIN_POSITION_PCT                   = 0.05    # min 5% (ensures meaningful trade 
 MAX_OPEN_POSITIONS_PER_STRATEGY    = 2
 MAX_PORTFOLIO_DRAWDOWN_PCT         = 0.20    # pause new entries at 20% drawdown
 
+# ─── Experiment lane controls ────────────────────────────────────────────────
+# Cap total allocation for high-frequency experiment strategies to protect
+# consistency while still collecting enough data.
+EXPERIMENT_LANE_ENABLED = os.getenv("EXPERIMENT_LANE_ENABLED", "true").lower() == "true"
+EXPERIMENT_LANE_CAP_PCT = float(os.getenv("EXPERIMENT_LANE_CAP_PCT", "0.30"))
+EXPERIMENT_LANE_STRATEGIES = {
+    s.strip() for s in os.getenv(
+        "EXPERIMENT_LANE_STRATEGIES",
+        "MACD_Momentum,EMA_Crossover,RSI_Bollinger,Breakout"
+    ).split(",") if s.strip()
+}
+
 # ─── Fees & Slippage ───────────────────────────────────────────────────────────
 TRADING_FEE = 0.001   # 0.1% Binance spot fee
 SLIPPAGE    = 0.0003  # 0.03% estimated slippage (conservative)

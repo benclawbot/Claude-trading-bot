@@ -318,8 +318,87 @@ class PortfolioManager:
             logger.warning(f"{strat_name}: drawdown limit hit – pausing new entries")
             return False
 
+        # Experiment lane allocation cap guard
+        if not self._experiment_lane_allows_entry(strat_name):
+            return False
+
         # Signal confidence
         if signal.confidence < 0.42:
+            return False
+
+        return True
+
+    # ─── Experiment-lane allocation guard ─────────────────────────────────────
+
+    @staticmethod
+    def _as_bool(value, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        text = str(value).strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return default
+
+    @staticmethod
+    def _as_float(value, default: float) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    def _experiment_lane_allows_entry(self, strat_name: str) -> bool:
+        enabled = self._as_bool(getattr(config, "EXPERIMENT_LANE_ENABLED", True), True)
+        if not enabled:
+            return True
+
+        raw_strategies = getattr(config, "EXPERIMENT_LANE_STRATEGIES", set())
+        if isinstance(raw_strategies, str):
+            lane_strategies = {s.strip() for s in raw_strategies.split(",") if s.strip()}
+        elif isinstance(raw_strategies, (set, list, tuple)):
+            lane_strategies = {str(s).strip() for s in raw_strategies if str(s).strip()}
+        else:
+            lane_strategies = set()
+
+        if strat_name not in lane_strategies:
+            return True
+
+        cap_pct = self._as_float(getattr(config, "EXPERIMENT_LANE_CAP_PCT", 0.30), 0.30)
+        cap_pct = max(0.0, min(1.0, cap_pct))
+
+        # If cap is explicitly zero, fully block experiment-lane entries.
+        if cap_pct == 0.0:
+            logger.warning(f"{strat_name}: experiment lane cap is 0%, blocking new entries")
+            return False
+
+        total_alloc = 0.0
+        lane_alloc = 0.0
+        for name, strat in self.strategies.items():
+            if not strat.is_active:
+                continue
+
+            free_cap = float(self._capital.get(name, 0.0))
+            committed = 0.0
+            for pos in db.get_open_positions(name):
+                committed += float(pos["entry_price"]) * float(pos["quantity"])
+
+            alloc = free_cap + committed
+            total_alloc += alloc
+            if name in lane_strategies:
+                lane_alloc += alloc
+
+        if total_alloc <= 0:
+            return True
+
+        lane_cap_abs = total_alloc * cap_pct
+        if lane_alloc >= lane_cap_abs:
+            logger.warning(
+                f"{strat_name}: experiment lane allocation cap reached "
+                f"(${lane_alloc:,.2f}/${lane_cap_abs:,.2f}, {cap_pct:.0%})"
+            )
             return False
 
         return True
