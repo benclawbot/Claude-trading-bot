@@ -105,6 +105,43 @@ class TestPortfolioManager:
         # Each strategy should get half of 10000
         assert pm._capital["Strategy1"] >= 0
         assert pm._capital["Strategy2"] >= 0
+
+    @patch("portfolio_manager.db")
+    @patch("portfolio_manager.BinanceClient")
+    @patch("portfolio_manager.config")
+    def test_allocate_capital_experiment_mode_weighted(self, mock_config, mock_binance_cls, mock_db):
+        """Experiment mode should reserve fixed pool for experiment strategies."""
+        mock_config.INITIAL_CAPITAL = 10000
+        mock_config.MAX_STRATEGIES = 7
+        mock_config.MAX_POSITION_PCT = 0.35
+        mock_config.TRADING_FEE = 0.001
+        mock_config.SLIPPAGE = 0.0003
+        mock_config.DEFAULT_STOP_LOSS_PCT = 0.025
+        mock_config.DEFAULT_TAKE_PROFIT_PCT = 0.055
+        mock_config.SYMBOL = "BTCUSDT"
+        mock_config.MAX_OPEN_POSITIONS_PER_STRATEGY = 2
+        mock_config.MAX_PORTFOLIO_DRAWDOWN_PCT = 0.20
+        mock_config.MIN_POSITION_PCT = 0.05
+        mock_config.CONFIDENCE_THRESHOLD = 0.40
+        mock_config.EXPERIMENT_MODE_ENABLED = True
+        mock_config.EXPERIMENT_MODE_CAPITAL_PCT = 0.20
+        mock_config.EXPERIMENT_MODE_STRATEGIES = {"MACD_Momentum"}
+
+        mock_db.get_trade_stats.return_value = {"total_pnl": 0}
+        mock_db.get_open_positions.return_value = []
+        mock_db.update_strategy_capital = Mock()
+
+        from portfolio_manager import PortfolioManager
+
+        core = MockStrategy("Residual_MeanRev", capital=0, is_active=True)
+        exp = MockStrategy("MACD_Momentum", capital=0, is_active=True)
+        mock_client = MagicMock()
+
+        pm = PortfolioManager(mock_client, [core, exp])
+        pm._allocate_capital(current_price=50000)
+
+        assert pm._capital["Residual_MeanRev"] == pytest.approx(8000.0, rel=1e-6)
+        assert pm._capital["MACD_Momentum"] == pytest.approx(2000.0, rel=1e-6)
     
     @patch("portfolio_manager.db")
     @patch("portfolio_manager.BinanceClient")

@@ -130,55 +130,109 @@ class TradingBot:
         logger.info(f"\nRunning backtests on {config.BACKTEST_DAYS} days of real Binance data…")
         bt_results = run_all_backtests(self.strategies, self.client)
 
-        # Activate strategies that pass thresholds
+        # Activate strategies that pass thresholds (+ optional experiment mode).
+        def _as_bool(value, default=False):
+            if isinstance(value, bool):
+                return value
+            if value is None:
+                return default
+            text = str(value).strip().lower()
+            if text in {"1", "true", "yes", "on"}:
+                return True
+            if text in {"0", "false", "no", "off"}:
+                return False
+            return default
+
+        def _as_float(value, default=0.0):
+            try:
+                return float(value)
+            except Exception:
+                return default
+
+        def _as_name_set(value):
+            if isinstance(value, str):
+                return {s.strip() for s in value.split(",") if s.strip()}
+            if isinstance(value, (set, list, tuple)):
+                return {str(s).strip() for s in value if str(s).strip()}
+            return set()
+
+        pass_names = {
+            name for name, r in bt_results.items()
+            if r and r.passes_threshold
+        }
+
+        exp_mode_enabled = _as_bool(getattr(config, "EXPERIMENT_MODE_ENABLED", False), False)
+        exp_mode_cap_pct = max(0.0, min(1.0, _as_float(getattr(config, "EXPERIMENT_MODE_CAPITAL_PCT", 0.20), 0.20)))
+        exp_mode_names = _as_name_set(getattr(config, "EXPERIMENT_MODE_STRATEGIES", set()))
+
+        exp_candidate_names = {
+            s.name for s in self.strategies
+            if s.name in exp_mode_names and s.name not in pass_names
+        }
+
+        experiment_pool = config.INITIAL_CAPITAL * exp_mode_cap_pct if exp_mode_enabled else 0.0
+        core_pool = max(config.INITIAL_CAPITAL - experiment_pool, 0.0)
+        core_share = core_pool / max(len(pass_names), 1)
+        experiment_share = experiment_pool / max(len(exp_candidate_names), 1) if exp_candidate_names else 0.0
+
+        if exp_mode_enabled:
+            logger.info(
+                f"Experiment mode ON | pool=${experiment_pool:,.2f} ({exp_mode_cap_pct:.0%}) | "
+                f"candidates={len(exp_candidate_names)}"
+            )
+
         active_count = 0
         for strat in self.strategies:
             result = bt_results.get(strat.name)
-            passes = False
+            passes = bool(result and result.passes_threshold)
             reason = "no backtest result"
-
             if result:
-                passes = result.passes_threshold   # CAGR ≥ threshold AND WR ≥ min AND PF ≥ min
                 reason = (
                     f"CAGR={result.cagr*100:.1f}% "
                     f"WR={result.win_rate*100:.1f}% "
                     f"PF={result.profit_factor:.2f}"
                 )
 
-            share = config.INITIAL_CAPITAL / max(
-                len([r for r in bt_results.values() if r and r.passes_threshold]), 1
-            )
+            is_experiment = exp_mode_enabled and (strat.name in exp_candidate_names)
 
             if passes:
                 strat.is_active = True
                 active_count += 1
                 symbol = "✓"
                 level = "info"
+            elif is_experiment and experiment_share > 0:
+                strat.is_active = True
+                active_count += 1
+                symbol = "△"
+                level = "info"
+                reason = f"EXPERIMENT | {reason}"
             else:
                 strat.is_active = False
-                share = 0
                 symbol = "✗"
                 level = "warning"
 
             getattr(logger, level)(f"  {symbol} {strat.name:20s}  {reason}")
+
             # Preserve existing capital on restart to avoid double-counting with
             # any open positions whose notional was already deducted in a prior run.
             # Only assign a fresh share when the strategy has no capital yet (first boot).
             existing_row = db.get_strategy(strat.name)
-            if passes:
-                new_capital = existing_row["capital"] if (existing_row and existing_row["capital"] > 0) else share
+            if strat.is_active:
+                target_share = experiment_share if is_experiment and not passes else core_share
+                new_capital = existing_row["capital"] if (existing_row and existing_row["capital"] > 0) else target_share
             else:
                 new_capital = 0
+
             db.upsert_strategy(
                 name=strat.name,
                 capital=new_capital,
                 params=strat.params,
                 backtest_cagr=result.cagr if result else 0,
                 backtest_win_rate=result.win_rate if result else 0,
-                is_active=passes,
+                is_active=strat.is_active,
             )
 
-        # If nothing passes, activate everything with reduced size
+        # If nothing passes (and no experiment candidate activated), activate all as fallback.
         if active_count == 0:
             logger.warning(
                 "No strategy passed backtest thresholds. "

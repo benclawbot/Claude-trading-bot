@@ -47,10 +47,38 @@ class PortfolioManager:
         Split initial capital equally among active strategies.
         Includes realized P&L from closed trades and unrealized P&L from open positions.
         """
-        active  = [s for s in self.strategies.values() if s.is_active]
-        n       = max(len(active), 1)
-        share   = config.INITIAL_CAPITAL / n
+        active = [s for s in self.strategies.values() if s.is_active]
+        if not active:
+            return
+
+        # Optional experiment-mode weighted allocation:
+        # reserve a fixed capital pool for experiment strategies.
+        exp_enabled = self._as_bool(getattr(config, "EXPERIMENT_MODE_ENABLED", False), False)
+        exp_cap_pct = max(0.0, min(1.0, self._as_float(getattr(config, "EXPERIMENT_MODE_CAPITAL_PCT", 0.20), 0.20)))
+
+        raw_exp_names = getattr(config, "EXPERIMENT_MODE_STRATEGIES", set())
+        if isinstance(raw_exp_names, str):
+            exp_names = {s.strip() for s in raw_exp_names.split(",") if s.strip()}
+        elif isinstance(raw_exp_names, (set, list, tuple)):
+            exp_names = {str(s).strip() for s in raw_exp_names if str(s).strip()}
+        else:
+            exp_names = set()
+
+        exp_active = [s for s in active if s.name in exp_names] if exp_enabled else []
+        core_active = [s for s in active if s.name not in exp_names] if exp_enabled else active
+
+        if exp_enabled and exp_active and core_active:
+            experiment_pool = config.INITIAL_CAPITAL * exp_cap_pct
+            core_pool = max(config.INITIAL_CAPITAL - experiment_pool, 0.0)
+            core_share = core_pool / len(core_active)
+            exp_share = experiment_pool / len(exp_active)
+        else:
+            # Fallback to equal weighting when experiment mode is off or only one side exists.
+            core_share = config.INITIAL_CAPITAL / len(active)
+            exp_share = core_share
+
         for strat in active:
+            share = exp_share if (exp_enabled and strat.name in exp_names and exp_active and core_active) else core_share
             # Reconstruct true capital from first principles:
             #   total_cap = initial share + realized P&L + unrealized P&L
             #   free_cap  = total_cap - notional locked in open positions

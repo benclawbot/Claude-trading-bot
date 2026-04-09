@@ -46,6 +46,17 @@ EXPERIMENT_LANE_STRATEGIES = {
     ).split(",") if s.strip()
 }
 
+# Experiment mode: allow selected strategies to run in low-capital data-collection
+# mode even when they fail the normal backtest pass thresholds.
+EXPERIMENT_MODE_ENABLED = os.getenv("EXPERIMENT_MODE_ENABLED", "false").lower() == "true"
+EXPERIMENT_MODE_CAPITAL_PCT = float(os.getenv("EXPERIMENT_MODE_CAPITAL_PCT", "0.20"))
+EXPERIMENT_MODE_STRATEGIES = {
+    s.strip() for s in os.getenv(
+        "EXPERIMENT_MODE_STRATEGIES",
+        "MACD_Momentum,EMA_Crossover"
+    ).split(",") if s.strip()
+}
+
 # ─── Fees & Slippage ───────────────────────────────────────────────────────────
 TRADING_FEE = 0.001   # 0.1% Binance spot fee
 SLIPPAGE    = 0.0003  # 0.03% estimated slippage (conservative)
