@@ -339,9 +339,16 @@ class PortfolioManager:
         conf_scale = 0.5 + signal.confidence
         # Scale by ML confidence
         ml_scale   = 0.8 + ml_confidence * 0.4
-        notional   = capital * base_pct * conf_scale * ml_scale
-        notional   = min(notional, capital * config.MAX_POSITION_PCT)
-        notional   = max(notional, 10.0)     # at least $10
+
+        # Global risk ladder multiplier from review_engine (defaults to 1.0).
+        try:
+            risk_multiplier = float(db.get_metadata("risk_size_multiplier") or "1.0")
+        except Exception:
+            risk_multiplier = 1.0
+
+        notional = capital * base_pct * conf_scale * ml_scale * risk_multiplier
+        notional = min(notional, capital * config.MAX_POSITION_PCT * risk_multiplier)
+        notional = max(notional, 10.0)     # at least $10
 
         quantity = notional / price
         return round(quantity, 5), notional

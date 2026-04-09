@@ -11,7 +11,8 @@ Changes:
 import sqlite3
 import json
 import threading
-from datetime import datetime
+import statistics
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 import config
@@ -131,6 +132,48 @@ def init_db():
             open_positions  INTEGER DEFAULT 0,
             UNIQUE(strategy_name, date)
         );
+
+        CREATE TABLE IF NOT EXISTS experiment_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            experiment_id TEXT NOT NULL,
+            week_id TEXT NOT NULL,
+            baseline_version TEXT NOT NULL,
+            weekly_pnl_pct REAL NOT NULL,
+            weekly_drawdown_pct REAL NOT NULL,
+            daily_pnl_std REAL NOT NULL,
+            max_daily_loss_pct REAL NOT NULL,
+            losing_streak_max INTEGER NOT NULL,
+            profit_factor REAL NOT NULL,
+            win_rate REAL NOT NULL,
+            avg_r REAL NOT NULL,
+            trade_count INTEGER NOT NULL,
+            score_consistency REAL NOT NULL,
+            score_drawdown REAL NOT NULL,
+            score_profit REAL NOT NULL,
+            score_quality REAL NOT NULL,
+            score_participation REAL NOT NULL,
+            score_total REAL NOT NULL,
+            decision TEXT NOT NULL CHECK (decision IN ('PROMOTE','KEEP_TESTING','DEMOTE','KILL','INSUFFICIENT_DATA')),
+            decision_reason TEXT NOT NULL,
+            reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(experiment_id, week_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS risk_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_id TEXT NOT NULL,
+            trigger_level_pct REAL NOT NULL,
+            portfolio_dd_pct REAL NOT NULL,
+            size_multiplier_applied REAL NOT NULL,
+            note TEXT DEFAULT '',
+            triggered_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_experiment_runs_week_decision
+            ON experiment_runs(week_id, decision);
+
+        CREATE INDEX IF NOT EXISTS idx_risk_events_week_time
+            ON risk_events(week_id, triggered_at);
     """)
     conn.commit()
     
@@ -187,24 +230,39 @@ def clear_old_data():
     conn.commit()
 
 
-def get_live_since() -> Optional[str]:
-    """Get the date when live trading started."""
+def get_metadata(key: str) -> Optional[str]:
+    """Read a metadata value by key."""
     row = get_conn().execute(
-        "SELECT value FROM bot_metadata WHERE key='live_since'"
+        "SELECT value FROM bot_metadata WHERE key=?",
+        (key,)
     ).fetchone()
     return row[0] if row else None
+
+
+def set_metadata(key: str, value: str):
+    """Upsert a metadata key/value pair."""
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO bot_metadata (key, value, updated_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')
+        """,
+        (key, value),
+    )
+    conn.commit()
+
+
+def get_live_since() -> Optional[str]:
+    """Get the date when live trading started."""
+    return get_metadata('live_since')
 
 
 def set_live_since():
     """Set the live trading start date if not already set."""
     existing = get_live_since()
     if not existing:
-        conn = get_conn()
-        conn.execute("""
-            INSERT OR REPLACE INTO bot_metadata (key, value, updated_at)
-            VALUES ('live_since', ?, datetime('now'))
-        """, (utc_now_iso(),))
-        conn.commit()
+        set_metadata('live_since', utc_now_iso())
 
 def upsert_strategy(name: str, capital: float, params: dict,
                     backtest_cagr: float = 0.0, backtest_win_rate: float = 0.0,
@@ -569,3 +627,211 @@ def get_strategy_performance_history(strategy_name: str, days: int = 90) -> List
         ORDER BY date ASC
     """, (strategy_name, f"-{days}")).fetchall()
     return [dict(row) for row in rows]
+
+
+# ─── Automated review helpers ────────────────────────────────────────────────
+
+def _parse_dt(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+
+    dt: Optional[datetime] = None
+    try:
+        # Handles offsets and trailing Z
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                dt = datetime.strptime(value, fmt)
+                break
+            except Exception:
+                continue
+
+    if dt is None:
+        return None
+
+    # Normalize to timezone-aware UTC to avoid naive/aware compare errors
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def get_recent_trade_metrics(strategy_name: Optional[str] = None, days: int = 7) -> Dict[str, float]:
+    """Compute recent metrics used by the auto review engine."""
+    conn = get_conn()
+    if strategy_name:
+        rows = conn.execute(
+            """
+            SELECT pnl, pnl_pct, exit_time
+            FROM trades
+            WHERE is_backtest=0 AND strategy_name=?
+            ORDER BY exit_time ASC
+            """,
+            (strategy_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT pnl, pnl_pct, exit_time
+            FROM trades
+            WHERE is_backtest=0
+            ORDER BY exit_time ASC
+            """
+        ).fetchall()
+
+    cutoff = utc_now() - timedelta(days=days)
+    filtered = []
+    for row in rows:
+        ts = _parse_dt(row["exit_time"])
+        if ts and ts >= cutoff:
+            filtered.append(dict(row))
+
+    if not filtered:
+        return {
+            "weekly_pnl_pct": 0.0,
+            "daily_pnl_std": 0.0,
+            "max_daily_loss_pct": 0.0,
+            "losing_streak_max": 0,
+            "profit_factor": 0.0,
+            "win_rate": 0.0,
+            "avg_r": 0.0,
+            "trade_count": 0,
+        }
+
+    pnl_pcts = [float(r["pnl_pct"]) for r in filtered]
+    wins = [x for x in pnl_pcts if x > 0]
+    losses = [x for x in pnl_pcts if x <= 0]
+
+    # Daily smoothness from per-day aggregated pnl_pct
+    by_day: Dict[str, float] = {}
+    for r in filtered:
+        dt = _parse_dt(r["exit_time"])
+        if not dt:
+            continue
+        day = dt.strftime("%Y-%m-%d")
+        by_day[day] = by_day.get(day, 0.0) + float(r["pnl_pct"])
+
+    daily_values = list(by_day.values()) or [0.0]
+    daily_std = statistics.pstdev(daily_values) if len(daily_values) > 1 else 0.0
+
+    # Losing streak max (by chronological exits)
+    streak = 0
+    max_streak = 0
+    for p in pnl_pcts:
+        if p <= 0:
+            streak += 1
+            max_streak = max(max_streak, streak)
+        else:
+            streak = 0
+
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
+
+    return {
+        "weekly_pnl_pct": float(sum(pnl_pcts)),
+        "daily_pnl_std": float(daily_std),
+        "max_daily_loss_pct": float(min(pnl_pcts)),
+        "losing_streak_max": int(max_streak),
+        "profit_factor": float(profit_factor),
+        "win_rate": float(len(wins) / len(filtered)),
+        "avg_r": float(sum(pnl_pcts) / len(filtered)),
+        "trade_count": int(len(filtered)),
+    }
+
+
+def get_portfolio_weekly_drawdown_pct(days: int = 7) -> float:
+    """Return max drawdown % (negative) from balance_history over last N days."""
+    rows = get_conn().execute(
+        "SELECT total_balance, recorded_at FROM balance_history ORDER BY recorded_at ASC"
+    ).fetchall()
+
+    cutoff = utc_now() - timedelta(days=days)
+    balances: List[float] = []
+    for row in rows:
+        ts = _parse_dt(row["recorded_at"])
+        if ts and ts >= cutoff:
+            balances.append(float(row["total_balance"]))
+
+    if not balances:
+        return 0.0
+
+    peak = balances[0]
+    max_dd = 0.0
+    for b in balances:
+        if b > peak:
+            peak = b
+        dd = ((b - peak) / peak) * 100 if peak > 0 else 0.0
+        if dd < max_dd:
+            max_dd = dd
+    return float(max_dd)
+
+
+def get_recent_portfolio_metrics(days: int = 7) -> Dict[str, float]:
+    """Portfolio-level metrics for baseline comparison."""
+    metrics = get_recent_trade_metrics(strategy_name=None, days=days)
+    metrics["weekly_drawdown_pct"] = get_portfolio_weekly_drawdown_pct(days=days)
+    return metrics
+
+
+def record_risk_event(week_id: str, trigger_level_pct: float,
+                      portfolio_dd_pct: float, size_multiplier_applied: float,
+                      note: str = ""):
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO risk_events
+        (week_id, trigger_level_pct, portfolio_dd_pct, size_multiplier_applied, note)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (week_id, trigger_level_pct, portfolio_dd_pct, size_multiplier_applied, note),
+    )
+    conn.commit()
+
+
+def upsert_experiment_run(payload: Dict[str, Any]):
+    """Insert/update an experiment review row keyed by (experiment_id, week_id)."""
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO experiment_runs (
+            experiment_id, week_id, baseline_version,
+            weekly_pnl_pct, weekly_drawdown_pct, daily_pnl_std,
+            max_daily_loss_pct, losing_streak_max,
+            profit_factor, win_rate, avg_r, trade_count,
+            score_consistency, score_drawdown, score_profit,
+            score_quality, score_participation, score_total,
+            decision, decision_reason, reviewed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(experiment_id, week_id) DO UPDATE SET
+            baseline_version=excluded.baseline_version,
+            weekly_pnl_pct=excluded.weekly_pnl_pct,
+            weekly_drawdown_pct=excluded.weekly_drawdown_pct,
+            daily_pnl_std=excluded.daily_pnl_std,
+            max_daily_loss_pct=excluded.max_daily_loss_pct,
+            losing_streak_max=excluded.losing_streak_max,
+            profit_factor=excluded.profit_factor,
+            win_rate=excluded.win_rate,
+            avg_r=excluded.avg_r,
+            trade_count=excluded.trade_count,
+            score_consistency=excluded.score_consistency,
+            score_drawdown=excluded.score_drawdown,
+            score_profit=excluded.score_profit,
+            score_quality=excluded.score_quality,
+            score_participation=excluded.score_participation,
+            score_total=excluded.score_total,
+            decision=excluded.decision,
+            decision_reason=excluded.decision_reason,
+            reviewed_at=datetime('now')
+        """,
+        (
+            payload["experiment_id"], payload["week_id"], payload["baseline_version"],
+            payload["weekly_pnl_pct"], payload["weekly_drawdown_pct"], payload["daily_pnl_std"],
+            payload["max_daily_loss_pct"], payload["losing_streak_max"],
+            payload["profit_factor"], payload["win_rate"], payload["avg_r"], payload["trade_count"],
+            payload["score_consistency"], payload["score_drawdown"], payload["score_profit"],
+            payload["score_quality"], payload["score_participation"], payload["score_total"],
+            payload["decision"], payload["decision_reason"],
+        ),
+    )
+    conn.commit()

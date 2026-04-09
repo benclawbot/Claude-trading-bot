@@ -32,6 +32,7 @@ from typing import Dict, List
 
 import config
 import database as db
+import review_engine
 from binance_client import BinanceClient
 from backtester import run_all_backtests
 from portfolio_manager import PortfolioManager
@@ -328,6 +329,16 @@ class TradingBot:
 
                 strat_dict = {s.name: s for s in self.strategies}
                 self.learning.update_performance_snapshots(strat_dict)
+
+                # Scheduled auto-review (Wed + Sun) for experiment scoring/risk ladder.
+                review_result = review_engine.maybe_run_scheduled_review()
+                if review_result.get("ran"):
+                    logger.info(
+                        "[learning] Auto-review complete | week=%s | size=%.2f | evaluated=%s",
+                        review_result.get("week_id"),
+                        review_result.get("size_multiplier", 1.0),
+                        review_result.get("strategies_evaluated", 0),
+                    )
 
             except Exception as e:
                 logger.error(f"[learning] Error: {e}", exc_info=True)
