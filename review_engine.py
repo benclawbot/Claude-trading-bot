@@ -6,6 +6,8 @@ and records risk ladder events in risk_events.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -13,6 +15,29 @@ from typing import Dict, Optional
 import database as db
 
 logger = logging.getLogger(__name__)
+
+
+def _stable_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def deterministic_experiment_id(strategy_name: str, params: Optional[Dict[str, object]] = None,
+                                experiment_tag: Optional[str] = None) -> str:
+    """Build deterministic ID from strategy + params (+ optional tag).
+
+    Format: <strategy>:<tag>:<12-char sha1>
+    """
+    params = params or {}
+    tag = experiment_tag or str(params.get("experiment_tag", "default"))
+    safe_tag = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in tag) or "default"
+
+    material = {
+        "strategy": strategy_name,
+        "tag": safe_tag,
+        "params": params,
+    }
+    digest = hashlib.sha1(_stable_json(material).encode("utf-8")).hexdigest()[:12]
+    return f"{strategy_name}:{safe_tag}:{digest}"
 
 
 def current_week_id(now: Optional[datetime] = None) -> str:
@@ -196,12 +221,15 @@ def run_auto_review(baseline_version: str = "auto", days: int = 7,
     active = db.get_active_strategies()
     for strat in active:
         strategy_name = strat["name"]
+        params = strat.get("params") or {}
+        experiment_id = deterministic_experiment_id(strategy_name, params=params)
+
         exp_metrics = db.get_recent_trade_metrics(strategy_name=strategy_name, days=days)
         exp_metrics["weekly_drawdown_pct"] = weekly_dd
 
         score = evaluate_experiment(exp_metrics, portfolio)
         payload = {
-            "experiment_id": strategy_name,
+            "experiment_id": experiment_id,
             "week_id": week_id,
             "baseline_version": baseline_version,
             "weekly_pnl_pct": exp_metrics["weekly_pnl_pct"],

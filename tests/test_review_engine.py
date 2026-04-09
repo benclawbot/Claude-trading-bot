@@ -6,6 +6,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import review_engine
 
 
+def test_deterministic_experiment_id_stable_for_same_inputs():
+    params = {"lookback": 24, "volume_multiplier": 1.5, "experiment_tag": "wk1-a"}
+    first = review_engine.deterministic_experiment_id("Breakout", params=params)
+    second = review_engine.deterministic_experiment_id("Breakout", params=params)
+
+    assert first == second
+    assert first.startswith("Breakout:wk1-a:")
+
+
+def test_deterministic_experiment_id_changes_when_params_change():
+    base = review_engine.deterministic_experiment_id("Breakout", params={"lookback": 24})
+    changed = review_engine.deterministic_experiment_id("Breakout", params={"lookback": 48})
+
+    assert base != changed
+
+
 def test_decide_size_multiplier_ladder():
     assert review_engine.decide_size_multiplier(-2.9) == 1.0
     assert review_engine.decide_size_multiplier(-3.0) == 0.70
