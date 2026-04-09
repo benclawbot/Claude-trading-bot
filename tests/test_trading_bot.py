@@ -83,8 +83,17 @@ class TestBinanceClient:
 class TestMLAdaptiveStrategy:
     """Test ML Adaptive strategy."""
     
-    def test_caution_level_calculation(self):
+    @patch("strategies.ml_adaptive.config")
+    def test_caution_level_calculation(self, mock_config):
         """Test regime caution level calculation."""
+        mock_config.STRATEGY_PARAMS = {
+            "ML_Adaptive": {
+                "min_confidence": 0.55,
+                "retrain_interval": 20,
+                "n_estimators": 100,
+                "candle_interval": "1h",
+            }
+        }
         from strategies.ml_adaptive import MLAdaptiveStrategy
         
         strategy = MLAdaptiveStrategy()
@@ -109,8 +118,17 @@ class TestMLAdaptiveStrategy:
         assert caution > 0.0
         assert caution <= 1.0
     
-    def test_learn_from_lessons(self):
+    @patch("strategies.ml_adaptive.config")
+    def test_learn_from_lessons(self, mock_config):
         """Test learning from journal entries."""
+        mock_config.STRATEGY_PARAMS = {
+            "ML_Adaptive": {
+                "min_confidence": 0.55,
+                "retrain_interval": 20,
+                "n_estimators": 100,
+                "candle_interval": "1h",
+            }
+        }
         from strategies.ml_adaptive import MLAdaptiveStrategy
         
         strategy = MLAdaptiveStrategy()

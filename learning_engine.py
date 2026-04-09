@@ -387,9 +387,10 @@ class LearningEngine:
 
         # ── Actionable lessons ────────────────────────────────────────────────
         lessons = self._derive_lessons(
-            strategy_name=strategy_name, won=won, regime=regime,
-            exit_reason=exit_reason, win_rate=win_rate,
-            consec_losses=consec_losses, recent_avg_pnl=recent_avg_pnl,
+            strategy_name=strategy_name,
+            won=won,
+            regime=regime,
+            exit_reason=exit_reason,
             feature_vec=feature_vec,
         )
 
@@ -489,68 +490,95 @@ Be specific and data-driven. No generic platitudes. Speak as if reviewing your o
         return result_str
 
     def _derive_lessons(self, strategy_name: str, won: bool, regime: str,
-                        exit_reason: str, win_rate: float,
-                        consec_losses: int, recent_avg_pnl: float,
-                        feature_vec: list) -> str:
+                        exit_reason: str, feature_vec: list) -> str:
         """
-        Derive specific, actionable lessons from the trade and current performance trends.
-        These lessons are read by the parameter tuner for future improvements.
+        Derive specific, actionable lessons from THIS trade only.
+        Uses per-trade factors: strategy name, market regime at time of trade,
+        exit reason, and whether this specific trade won or lost.
+        Aggregate rolling stats (win rate, consecutive losses, avg PnL) belong
+        in performance monitoring — not in per-trade lesson generation.
         """
         lessons = []
 
-        # Win rate trend
-        if win_rate < 0.38:
-            lessons.append(
-                f"⚠️ Win rate critically low ({win_rate:.1%}) over last 20 trades — "
-                f"parameters have been tightened automatically."
-            )
-        elif win_rate > 0.65:
-            lessons.append(
-                f"✓ Win rate strong ({win_rate:.1%}) — parameters relaxed slightly to capture more trades."
-            )
-
-        # Consecutive loss circuit breaker
-        if consec_losses >= 3:
-            lessons.append(
-                f"🔴 {consec_losses} consecutive losses detected — "
-                f"confidence threshold raised temporarily to filter weaker setups."
-            )
-
-        # Regime-specific insights
+        # ── Regime-specific insights (per-trade: strategy + regime + outcome) ──
         if strategy_name == "RSI_Bollinger" and regime in ("TRENDING_UP", "TRENDING_DOWN") and not won:
             lessons.append(
-                "Lesson: RSI_Bollinger signal fired during a trending regime — mean reversion "
-                "strategies underperform when ADX > 35. Consider pausing this strategy during "
-                "confirmed trends."
+                "Lesson: RSI_Bollinger mean reversion signal fired during a "
+                "trending regime — strategies underperform when ADX > 35. "
+                "Consider pausing this strategy during confirmed trends."
             )
+        elif strategy_name == "RSI_Bollinger" and regime == "RANGING" and won:
+            lessons.append(
+                "Lesson: RSI_Bollinger worked correctly in a ranging regime. "
+                "Mean reversion signals align well with low-ADX environments."
+            )
+
         if strategy_name in ("EMA_Crossover", "MACD_Momentum") and regime == "RANGING" and not won:
             lessons.append(
                 "Lesson: Trend-following strategy signaled in a ranging market. "
                 "Add ADX filter: require ADX > 25 before entering trend signals."
             )
+        elif strategy_name in ("EMA_Crossover", "MACD_Momentum") and regime in ("TRENDING_UP", "TRENDING_DOWN") and won:
+            lessons.append(
+                "Lesson: Trend-following signal aligned with market direction. "
+                "Confirm regime via ADX to validate trend strength before entry."
+            )
 
-        # Exit reason analysis
+        if strategy_name == "Breakout" and regime == "RANGING" and won:
+            lessons.append(
+                "Lesson: Breakout from range preceded a strong move. "
+                "Confirm volume surge at breakout for higher signal reliability."
+            )
+        elif strategy_name == "Breakout" and regime in ("TRENDING_UP", "TRENDING_DOWN") and not won:
+            lessons.append(
+                "Lesson: Breakout failed — market was already in a strong trend. "
+                "Wait for pullbacks to key levels rather than chasing extended moves."
+            )
+
+        if strategy_name == "ML_Adaptive" and won:
+            lessons.append(
+                "Lesson: ML model prediction confirmed by market outcome. "
+                "Feature vector captured directional edge for this regime."
+            )
+        elif strategy_name == "ML_Adaptive" and not won:
+            lessons.append(
+                "Lesson: ML prediction failed — possible regime shift mid-trade "
+                "or insufficient recent training data for current conditions."
+            )
+
+        # ── Exit reason analysis (per-trade) ───────────────────────────────────
         if exit_reason == "STOP_LOSS":
             lessons.append(
-                "Trade stopped out. Review: was the stop too tight for the ATR of the entry candle? "
-                "Consider ATR-based stops instead of fixed percentage."
+                "Trade stopped out. Review: was the stop too tight for the ATR "
+                "of the entry candle? Consider ATR-based stops instead of fixed %."
             )
         elif exit_reason == "TAKE_PROFIT" and won:
             lessons.append(
-                "Take-profit hit — consider trailing stop on momentum trades to capture extended moves."
+                "Take-profit hit successfully. Consider trailing stops on "
+                "momentum trades to capture extended moves beyond initial target."
             )
-
-        # Average PnL trend
-        if recent_avg_pnl < -0.005:
+        elif exit_reason == "TAKE_PROFIT" and not won:
             lessons.append(
-                f"📉 Average PnL over last 10 trades: {recent_avg_pnl*100:.2f}%. "
-                "Consider reducing position size until edge is re-established."
+                "Take-profit hit but trade still lost — entry was likely late "
+                "or position size was too large relative to move magnitude."
+            )
+        elif exit_reason == "TRAILING_STOP" and won:
+            lessons.append(
+                "Trailing stop captured an extended move. Good trade management "
+                "for momentum-driven strategies."
+            )
+        elif exit_reason == "TIME_EXIT" and not won:
+            lessons.append(
+                "Trade timed out without hitting TP/SL. Time exits can cut winners "
+                "short in strong trends — consider tightening trailing stop instead."
             )
 
+        # ── Fallback: no per-trade lesson triggered ────────────────────────────
         if not lessons:
             lessons.append(
-                f"Trade executed within normal parameters. "
-                f"Current win rate: {win_rate:.1%}. Continue monitoring."
+                "Trade executed within normal parameters. "
+                f"Strategy: {strategy_name} | Regime: {regime} | "
+                f"Exit: {exit_reason} | {'Win' if won else 'Loss'}."
             )
 
         return " | ".join(lessons)

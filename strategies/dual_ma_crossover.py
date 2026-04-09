@@ -23,11 +23,11 @@ class DualMACrossoverStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("DualMA_Crossover", {
-            "fast_period":     100,
-            "slow_period":     250,
+            "fast_period":     20,
+            "slow_period":     60,
             "atr_sl_mult":     2.0,
-            "atr_tp_mult":     5.0,
-            "candle_interval": "1d",
+            "atr_tp_mult":     4.5,
+            "candle_interval": "4h",
         })
         if params:
             defaults.update(params)

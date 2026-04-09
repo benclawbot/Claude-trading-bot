@@ -56,11 +56,11 @@ class ResidualMeanReversionStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("Residual_MeanRev", {
-            "reg_window":      60,     # OLS regression lookback
-            "zscore_window":   30,     # window for z-score normalisation
-            "entry_threshold": 1.5,    # |z| > this → signal
-            "atr_sl_mult":     1.8,
-            "atr_tp_mult":     3.5,
+            "reg_window":      30,     # OLS regression lookback
+            "zscore_window":   15,     # window for z-score normalisation
+            "entry_threshold": 1.2,    # |z| > this → signal
+            "atr_sl_mult":     1.5,
+            "atr_tp_mult":     3.0,
             "candle_interval": "4h",
         })
         if params:

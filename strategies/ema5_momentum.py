@@ -24,9 +24,9 @@ class EMA5MomentumStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("EMA5_Momentum", {
-            "ema_period":      5,
-            "atr_sl_mult":     1.5,
-            "atr_tp_mult":     3.5,
+            "ema_period":      3,
+            "atr_sl_mult":     0.75,
+            "atr_tp_mult":     1.5,
             "candle_interval": "1d",
         })
         if params:

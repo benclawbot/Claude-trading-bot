@@ -112,13 +112,14 @@ class BinanceWebSocketClient:
     WS_BASE = "wss://stream.binance.com:9443/ws"
     RECONNECT_DELAY = 5  # seconds
     
-    def __init__(self, symbols: List[str] = None):
+    def __init__(self, symbols: List[str] = None, ws_url: str = None):
         self._symbols = symbols or ["btcusdt"]
         self._price_callbacks: List[Callable[[str, float], None]] = []
         self._running = False
         self._thread = None
         self._current_prices: Dict[str, float] = {}
         self._lock = threading.Lock()
+        self._ws_url = ws_url or self.WS_BASE
         
         if not WEBSOCKET_AVAILABLE:
             logger.warning("WebSockets not available - using REST polling")
@@ -154,7 +155,7 @@ class BinanceWebSocketClient:
         while self._running:
             try:
                 streams = "/".join([f"{s}@ticker" for s in self._symbols])
-                ws_url = f"{self.WS_BASE}/{streams}"
+                ws_url = f"{self._ws_url}/{streams}"
                 
                 import asyncio
                 asyncio.run(self._connect(ws_url))
@@ -168,23 +169,42 @@ class BinanceWebSocketClient:
         """Connect to WebSocket and process messages."""
         if not WEBSOCKET_AVAILABLE:
             return
-            
-        try:
-            async with websockets.connect(ws_url) as ws:
-                logger.info(f"WebSocket connected to {ws_url}")
-                
-                async for message in ws:
-                    if not self._running:
-                        break
-                    
-                    try:
-                        data = json.loads(message)
-                        self._process_ticker(data)
-                    except Exception as e:
-                        logger.debug(f"WebSocket message error: {e}")
-                        
-        except Exception as e:
-            logger.warning(f"WebSocket connection lost: {e}")
+        
+        # Handle HTTP 404 — permanent failure (WebSocket endpoint doesn't exist)
+        if ws_url.startswith("wss://testnet.binance.vision"):
+            try:
+                async with websockets.connect(ws_url, open_timeout=5) as ws:
+                    logger.info(f"WebSocket connected to {ws_url}")
+                    async for message in ws:
+                        if not self._running:
+                            break
+                        try:
+                            data = json.loads(message)
+                            self._process_ticker(data)
+                        except Exception as e:
+                            logger.debug(f"WebSocket message error: {e}")
+            except websockets.exceptions.InvalidStatusCode as e:
+                if e.status_code == 404:
+                    logger.warning(f"WebSocket endpoint not found (404) — falling back to REST polling permanently")
+                    self._running = False
+                else:
+                    logger.warning(f"WebSocket connection lost: {e}")
+            except Exception as e:
+                logger.warning(f"WebSocket connection lost: {e}")
+        else:
+            try:
+                async with websockets.connect(ws_url) as ws:
+                    logger.info(f"WebSocket connected to {ws_url}")
+                    async for message in ws:
+                        if not self._running:
+                            break
+                        try:
+                            data = json.loads(message)
+                            self._process_ticker(data)
+                        except Exception as e:
+                            logger.debug(f"WebSocket message error: {e}")
+            except Exception as e:
+                logger.warning(f"WebSocket connection lost: {e}")
     
     def _process_ticker(self, data: dict):
         """Process a ticker update message."""
@@ -514,7 +534,8 @@ class BinanceClient:
         self._ws_client = None
         if use_websocket and WEBSOCKET_AVAILABLE:
             try:
-                self._ws_client = BinanceWebSocketClient(["btcusdt"])
+                ws_url = config.TESTNET_WS_URL if config.USE_TESTNET else "wss://stream.binance.com:9443/ws"
+                self._ws_client = BinanceWebSocketClient(["btcusdt"], ws_url=ws_url)
                 self._ws_client.start()
                 logger.info("WebSocket enabled for real-time prices")
             except Exception as e:

@@ -27,9 +27,9 @@ class PriceMomentum25Strategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("PriceMomentum_25", {
-            "lookback":        25,
+            "lookback":        14,
             "atr_sl_mult":     1.5,
-            "atr_tp_mult":     4.0,
+            "atr_tp_mult":     3.5,
             "candle_interval": "1d",
         })
         if params:

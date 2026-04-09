@@ -35,13 +35,13 @@ class BlendedMomentumMRStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("Blended_MomentumMR", {
-            "momentum_period":  25,    # close-to-close lookback
-            "rsi_oversold":     38,
-            "rsi_overbought":   62,
+            "momentum_period":  20,
+            "rsi_oversold":     35,
+            "rsi_overbought":   65,
             "bb_period":        20,
             "bb_std":           2.0,
-            "atr_sl_mult":      1.8,
-            "atr_tp_mult":      3.8,
+            "atr_sl_mult":      1.5,
+            "atr_tp_mult":      3.0,
             "candle_interval":  "4h",
         })
         if params:

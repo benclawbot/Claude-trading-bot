@@ -27,10 +27,10 @@ class DonchianBreakoutStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
         defaults = config.STRATEGY_PARAMS.get("Donchian_Breakout", {
-            "dc_period":       15,     # Donchian channel lookback (days)
-            "adx_calm_max":    25,     # ADX must be BELOW this to enter
-            "atr_sl_mult":     1.5,
-            "atr_tp_mult":     3.5,
+            "dc_period":       20,     # Donchian channel lookback (days)
+            "adx_calm_max":    99,     # effectively disabled
+            "atr_sl_mult":     2.0,
+            "atr_tp_mult":     5.0,
             "candle_interval": "1d",
         })
         if params:

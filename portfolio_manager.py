@@ -167,6 +167,16 @@ class PortfolioManager:
             self._capital[strat_name] -= notional
             db.update_strategy_capital(strat_name, self._capital[strat_name])
 
+            # Notify via Telegram
+            self._send_telegram(
+                f"📊 **Trade Opened**\n"
+                f"Strategy: `{strat_name}`\n"
+                f"Side: **{side}**\n"
+                f"Entry: ${fill_price:,.2f}\n"
+                f"SL: ${sl:,.2f} | TP: ${tp:,.2f}\n"
+                f"ML confidence: {ml_confidence:.0%}"
+            )
+
             logger.info(
                 f"[{strat_name}] OPEN {side} {quantity:.5f} BTC @ ${fill_price:,.2f} "
                 f"| SL=${sl:,.2f} TP=${tp:,.2f} | notional=${notional:,.2f}"
@@ -186,7 +196,8 @@ class PortfolioManager:
             if hit:
                 self._close_position(pos, current_price, reason)
 
-    def _check_sl_tp(self, pos: dict, price: float) -> tuple:
+    @staticmethod
+    def _check_sl_tp(pos: dict, price: float) -> tuple:
         """Returns (True, reason) if position should be closed."""
         if pos["side"] == "LONG":
             if price <= pos["stop_loss"]:
@@ -278,6 +289,15 @@ class PortfolioManager:
         logger.info(
             f"[{strat_name}] CLOSE {side} {qty:.5f} BTC @ ${exit_price:,.2f} "
             f"| PnL ${net_pnl:+.2f} ({pnl_pct*100:+.2f}%) | {reason}"
+        )
+
+        self._send_telegram(
+            f"✅ **Trade Closed**\n"
+            f"Strategy: `{strat_name}`\n"
+            f"Side: **{side}**\n"
+            f"Exit: ${exit_price:,.2f}\n"
+            f"PnL: ${net_pnl:+.2f} ({pnl_pct*100:+.2f}%)\n"
+            f"Reason: {reason}"
         )
 
         return trade_id, net_pnl, pnl_pct, dur_hours, entry_features
@@ -405,3 +425,15 @@ class PortfolioManager:
         except Exception:
             pass
         return fallback
+
+    @staticmethod
+    def _send_telegram(message: str):
+        """Send a Telegram notification via openclaw CLI."""
+        import subprocess, sys
+        try:
+            subprocess.run(
+                ["openclaw", "send", "--message", message, "--channel", "telegram"],
+                capture_output=True, text=True, timeout=20,
+            )
+        except Exception:
+            pass  # non-blocking — don't disrupt trading

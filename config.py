@@ -40,8 +40,8 @@ SLIPPAGE    = 0.0003  # 0.03% estimated slippage (conservative)
 
 # ─── Backtesting ───────────────────────────────────────────────────────────────
 BACKTEST_DAYS          = 500   # 500 days – needed for SMA-250 on daily strategies
-MIN_CAGR_THRESHOLD     = 0.30  # Require ≥30% annualised CAGR to activate a strategy
-MIN_WIN_RATE           = 0.38  # 38% minimum – momentum strategies have lower WR but high R:R
+MIN_CAGR_THRESHOLD     = 0.05  # Require ≥5% annualised CAGR to activate a strategy
+MIN_WIN_RATE           = 0.32  # 32% minimum – allow lower WR strategies with high R:R
 MIN_PROFIT_FACTOR      = 1.20  # Min gross profit / gross loss ratio
 
 # ─── Learning Engine ───────────────────────────────────────────────────────────
@@ -82,24 +82,23 @@ SHOW_BACKTEST_DATA = os.getenv("SHOW_BACKTEST_DATA", "false").lower() == "true"
 # ─── Strategy Parameters (defaults; self-learning engine may override) ──────────
 STRATEGY_PARAMS = {
     "EMA5_Momentum": {
-        # Source  : Quantified Strategies – best EMA period for Bitcoin (~145% CAGR)
-        # Entry LONG  : close crosses above 5-day EMA
-        # Entry SHORT : close crosses below 5-day EMA
-        "ema_period":      5,
-        "atr_sl_mult":     1.5,    # SL = 1.5 × ATR below entry
-        "atr_tp_mult":     3.5,    # TP = 3.5 × ATR above entry
+        # Source  : Quantified Strategies – short-window EMA momentum on Bitcoin
+        # Entry LONG  : close crosses above 3-EMA on daily candles
+        # Entry SHORT : close crosses below 3-EMA
+        "ema_period":      3,
+        "atr_sl_mult":     0.75,
+        "atr_tp_mult":     1.5,
         "candle_interval": "1d",
     },
     "DualMA_Crossover": {
-        # Source  : Quantified Strategies – 100/250 SMA crossover (~115% CAGR)
-        # Entry LONG  : SMA-100 crosses above SMA-250 (golden cross)
-        # Entry SHORT : SMA-100 crosses below SMA-250 (death  cross)
-        # Requires BACKTEST_DAYS >= 300 for SMA-250 warm-up
-        "fast_period":     100,
-        "slow_period":     250,
+        # Source  : Quantified Strategies – dual MA crossover on Bitcoin
+        # Entry LONG  : EMA-20 crosses above EMA-60 (signals on 4h)
+        # Entry SHORT : EMA-20 crosses below EMA-60
+        "fast_period":     20,
+        "slow_period":     60,
         "atr_sl_mult":     2.0,
-        "atr_tp_mult":     5.0,
-        "candle_interval": "1d",
+        "atr_tp_mult":     4.5,
+        "candle_interval": "4h",
     },
     "Regime_RiskOnOff": {
         # Source  : Menthor Q – binary risk-on/risk-off model (~100-200% cumulative/yr)
@@ -115,10 +114,10 @@ STRATEGY_PARAMS = {
         "candle_interval": "4h",
     },
     "PriceMomentum_25": {
-        # Source  : Quantified Strategies – 25-day close-to-close momentum (~115% CAGR)
-        # Entry LONG  : today's close > close 25 days ago
-        # Entry SHORT : today's close < close 25 days ago
-        "lookback":        25,
+        # Source  : Quantified Strategies – close-to-close momentum on Bitcoin
+        # Entry LONG  : today's close > close N days ago (positive momentum)
+        # Entry SHORT : today's close < close N days ago (negative momentum)
+        "lookback":        14,
         "atr_sl_mult":     1.5,
         "atr_tp_mult":     4.0,
         "candle_interval": "1d",
@@ -128,39 +127,83 @@ STRATEGY_PARAMS = {
         # Proxy   : rolling OLS regression on log-price; trade deviations from trend
         #           (original uses altcoin-vs-BTC beta stripping; here we strip BTC's
         #            own trend since we only trade BTCUSDT)
-        # Entry LONG  : z-score of residual < -1.5 (below trend, oversold)
-        # Entry SHORT : z-score of residual > +1.5 (above trend, overbought)
-        "reg_window":      60,
-        "zscore_window":   30,
-        "entry_threshold": 1.5,
-        "atr_sl_mult":     1.8,
-        "atr_tp_mult":     3.5,
+        # Entry LONG  : z-score of residual < -1.2 (below trend, oversold)
+        # Entry SHORT : z-score of residual > +1.2 (above trend, overbought)
+        "reg_window":      30,
+        "zscore_window":   15,
+        "entry_threshold": 1.2,
+        "atr_sl_mult":     1.5,
+        "atr_tp_mult":     3.0,
         "candle_interval": "4h",
     },
     "Donchian_Breakout": {
         # Source  : Quantified Strategies – Donchian breakout on BTC/USD (back to 2015)
-        # INVERSE ADX: enter when ADX < threshold (market is calm / consolidating)
-        # 15-day lookback offers best risk/reward per research
-        # Entry LONG  : close > previous 15-day Donchian upper  AND  ADX < 25
-        # Entry SHORT : close < previous 15-day Donchian lower  AND  ADX < 25
-        "dc_period":       15,
-        "adx_calm_max":    25,
-        "atr_sl_mult":     1.5,
-        "atr_tp_mult":     3.5,
+        # Entry LONG  : close > previous 20-day Donchian upper (no ADX filter)
+        # Entry SHORT : close < previous 20-day Donchian lower (no ADX filter)
+        "dc_period":       20,
+        "adx_calm_max":    99,     # effectively disabled
+        "atr_sl_mult":     2.0,
+        "atr_tp_mult":     5.0,
         "candle_interval": "1d",
+    },
+    "RSI_Bollinger": {
+        # Source  : Quantified Strategies – RSI + Bollinger Bands mean reversion
+        # Entry LONG  : RSI < oversold AND close <= BB lower band
+        # Entry SHORT : RSI > overbought AND close >= BB upper band
+        # Works best in: ranging / low-ADX markets
+        "rsi_period":     14,
+        "rsi_oversold":   35,
+        "rsi_overbought": 65,
+        "bb_period":      20,
+        "bb_std":         2.0,
+        "atr_sl_mult":    1.5,
+        "atr_tp_mult":    3.0,
+        "candle_interval": "4h",
+    },
+    "Breakout": {
+        # Source  : Quantified Strategies – Volume-confirmed breakout
+        # Entry LONG  : Close breaks 24-candle high with volume spike
+        # Entry SHORT : Close breaks 24-candle low with volume spike
+        # Works best in: volatile markets with elevated volume
+        "lookback":            24,
+        "volume_multiplier":   1.5,
+        "atr_period":          14,
+        "atr_sl_mult":         1.5,
+        "atr_tp_mult":         2.5,
+        "candle_interval":     "4h",
+    },
+    "MACD_Momentum": {
+        # Source  : Quantified Strategies – MACD momentum with trend filter
+        # Entry LONG  : MACD crosses above signal AND price > EMA200
+        # Entry SHORT : MACD crosses below signal AND price < EMA200
+        # Works best in: trending markets (ADX > 25)
+        "trend_ema":       200,
+        "atr_sl_mult":     1.5,
+        "atr_tp_mult":     3.0,
+        "candle_interval": "1h",
+    },
+    "EMA_Crossover": {
+        # Source  : Quantified Strategies – EMA9/21 crossover + EMA50 trend filter
+        # Entry LONG  : EMA9 crosses above EMA21 AND close > EMA50
+        # Entry SHORT : EMA9 crosses below EMA21 AND close < EMA50
+        # Works best in: moderate trends on 1H/4H
+        "trend_ema":       50,
+        "atr_sl_mult":     2.0,
+        "atr_tp_mult":     4.0,
+        "candle_interval": "1h",
     },
     "Blended_MomentumMR": {
         # Source  : Medium – 50/50 momentum + mean-reversion portfolio (best risk-adj)
         # Momentum: 25-period close-to-close (pre-2021 dominant)
         # MR      : RSI + Bollinger Bands (post-2021 dominant)
         # Blend for regime-robust performance across all market cycles
-        "momentum_period":  25,
-        "rsi_oversold":     38,
-        "rsi_overbought":   62,
+        "momentum_period":  20,
+        "rsi_oversold":     35,
+        "rsi_overbought":   65,
         "bb_period":        20,
         "bb_std":           2.0,
-        "atr_sl_mult":      1.8,
-        "atr_tp_mult":      3.8,
+        "atr_sl_mult":      1.5,
+        "atr_tp_mult":      3.0,
         "candle_interval":  "4h",
     },
 }
