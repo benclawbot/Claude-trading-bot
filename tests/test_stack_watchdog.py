@@ -175,3 +175,26 @@ def test_write_incident_if_needed_skips_clean_ok(tmp_path, monkeypatch):
     wrote = stack_watchdog.write_incident_if_needed(result)
     assert wrote is False
     assert not incidents.exists()
+
+
+def test_write_incident_if_needed_dedups_within_30min(tmp_path, monkeypatch):
+    incidents = tmp_path / "INCIDENTS.md"
+    monkeypatch.setattr(stack_watchdog, "INCIDENTS_FILE", incidents)
+
+    result = {
+        "status": "warn",
+        "issues": ["dashboard_not_ready"],
+        "actions": ["bot_restart"],
+        "gateway": {"healthy": True},
+        "bot": {"running": True, "pids": [123]},
+        "dashboard": {"healthy": False, "listening": False, "http_ok": False},
+        "startup_grace": False,
+    }
+
+    first = stack_watchdog.write_incident_if_needed(result)
+    second = stack_watchdog.write_incident_if_needed(result)
+    assert first is True
+    assert second is False
+
+    text = incidents.read_text(encoding="utf-8")
+    assert text.count("### Incident") == 1

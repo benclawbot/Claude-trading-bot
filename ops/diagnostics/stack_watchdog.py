@@ -223,6 +223,47 @@ def wait_for_dashboard(timeout_s: int = STARTUP_GRACE_SECONDS, interval_s: int =
     return last
 
 
+def _incident_signature(result: Dict[str, object]) -> str:
+    status = result.get("status", "unknown")
+    issues = ",".join(sorted(str(x) for x in (result.get("issues") or []))) or "none"
+    actions = ",".join(sorted(str(x) for x in (result.get("actions") or []))) or "none"
+    startup_grace = bool(result.get("startup_grace"))
+    return f"{status}|{issues}|{actions}|startup_grace={startup_grace}"
+
+
+def _last_incident_meta(text: str) -> Optional[Tuple[datetime, str]]:
+    blocks = [b for b in text.split("### Incident ") if b.strip()]
+    if not blocks:
+        return None
+    last = blocks[-1]
+    header, *rest = last.splitlines()
+    m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", header)
+    if not m:
+        return None
+    ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").astimezone()
+
+    status = "unknown"
+    issues = "none"
+    actions = "none"
+    startup_grace = False
+    signature = None
+    for line in rest:
+        l = line.strip()
+        if l.startswith("- signature:"):
+            signature = l.split(":", 1)[1].strip()
+        elif l.startswith("- status:"):
+            status = l.split(":", 1)[1].strip()
+        elif l.startswith("- issues:"):
+            issues = l.split(":", 1)[1].strip()
+        elif l.startswith("- actions:"):
+            actions = l.split(":", 1)[1].strip()
+        elif "startup_grace_window" in l:
+            startup_grace = True
+
+    sig = signature or f"{status}|{issues}|{actions}|startup_grace={startup_grace}"
+    return ts, sig
+
+
 def _build_incident_block(result: Dict[str, object]) -> str:
     now_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -248,6 +289,7 @@ def _build_incident_block(result: Dict[str, object]) -> str:
         f"- bot_pids: {result.get('bot', {}).get('pids')}",
         f"- dashboard: {result.get('dashboard')}",
         f"- likely_cause: {cause}",
+        f"- signature: {_incident_signature(result)}",
         "- follow_up_prevention_action: keep watchdog canonical script as single remediation path and avoid ad-hoc restarts.",
         "",
     ]
@@ -269,6 +311,15 @@ def write_incident_if_needed(result: Dict[str, object]) -> bool:
 
     if not current.strip():
         current = "# INCIDENTS\n\n"
+
+    # Dedup identical incidents within 30 minutes
+    last_meta = _last_incident_meta(current)
+    new_sig = _incident_signature(result)
+    if last_meta:
+        last_ts, last_sig = last_meta
+        now_local = datetime.now().astimezone()
+        if last_sig == new_sig and (now_local - last_ts).total_seconds() < 1800:
+            return False
 
     block = _build_incident_block(result)
     INCIDENTS_FILE.write_text(current.rstrip() + "\n\n" + block, encoding="utf-8")
