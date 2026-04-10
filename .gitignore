@@ -4,10 +4,17 @@ __pycache__/
 *.db-shm
 *.db-wal
 .env
+.env.*
 *.log
 *.log.*
 .coverage
+.coverage.*
 htmlcov/
+
+# Local bot state / artifacts
+.canary_last.json
+.watch_state.json
+models/*.pkl
 
 # Prevent accidental OS path artifacts
 *\\*
