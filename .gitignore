@@ -5,3 +5,10 @@ __pycache__/
 *.db-wal
 .env
 *.log
+*.log.*
+.coverage
+htmlcov/
+
+# Prevent accidental OS path artifacts
+*\\*
+*:*
