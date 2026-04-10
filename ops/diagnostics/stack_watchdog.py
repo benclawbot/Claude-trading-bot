@@ -22,6 +22,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -33,6 +34,7 @@ STALE_LOCK_SECONDS = 300
 STARTUP_GRACE_SECONDS = 180
 DASHBOARD_PORT = 8050
 DASHBOARD_URL = "http://127.0.0.1:8050"
+INCIDENTS_FILE = BOT_REPO / "ops" / "INCIDENTS.md"
 
 
 @dataclass
@@ -221,6 +223,58 @@ def wait_for_dashboard(timeout_s: int = STARTUP_GRACE_SECONDS, interval_s: int =
     return last
 
 
+def _build_incident_block(result: Dict[str, object]) -> str:
+    now_local = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    status = result.get("status", "unknown")
+    issues = result.get("issues") or []
+    actions = result.get("actions") or []
+
+    if status == "warn" and result.get("startup_grace"):
+        cause = "startup_grace_window"
+    elif issues:
+        cause = ", ".join(str(x) for x in issues)
+    else:
+        cause = "remediation_performed"
+
+    block = [
+        f"### Incident {now_local} | {now_utc}",
+        f"- status: {status}",
+        f"- issues: {issues if issues else ['none']}",
+        f"- actions: {actions if actions else ['none']}",
+        f"- gateway_healthy: {result.get('gateway', {}).get('healthy')}",
+        f"- bot_running: {result.get('bot', {}).get('running')}",
+        f"- bot_pids: {result.get('bot', {}).get('pids')}",
+        f"- dashboard: {result.get('dashboard')}",
+        f"- likely_cause: {cause}",
+        "- follow_up_prevention_action: keep watchdog canonical script as single remediation path and avoid ad-hoc restarts.",
+        "",
+    ]
+    return "\n".join(block)
+
+
+def write_incident_if_needed(result: Dict[str, object]) -> bool:
+    status = result.get("status")
+    actions = result.get("actions") or []
+    needs_incident = status in {"warn", "fail"} or bool(actions)
+    if not needs_incident:
+        return False
+
+    INCIDENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if INCIDENTS_FILE.exists():
+        current = INCIDENTS_FILE.read_text(encoding="utf-8")
+    else:
+        current = "# INCIDENTS\n\n"
+
+    if not current.strip():
+        current = "# INCIDENTS\n\n"
+
+    block = _build_incident_block(result)
+    INCIDENTS_FILE.write_text(current.rstrip() + "\n\n" + block, encoding="utf-8")
+    return True
+
+
 def watchdog(remediate: bool = False) -> Dict[str, object]:
     actions: List[str] = []
 
@@ -314,6 +368,9 @@ def main() -> int:
     args = parser.parse_args()
 
     result = watchdog(remediate=args.remediate)
+    incident_written = write_incident_if_needed(result)
+    if incident_written:
+        result["incident_logged"] = str(INCIDENTS_FILE)
     print(json.dumps(result, indent=2))
     if result["status"] == "fail":
         return 2

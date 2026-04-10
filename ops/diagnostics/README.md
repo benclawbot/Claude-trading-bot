@@ -9,6 +9,7 @@ Run from repo root:
 - .venv/bin/python ops/diagnostics/portfolio_integrity_autofix.py
 - .venv/bin/python ops/diagnostics/stack_watchdog.py
 - .venv/bin/python ops/diagnostics/stack_watchdog.py --remediate
+- .venv/bin/python ops/diagnostics/stability_gate_check.py
 
 Notes:
 - stack_watchdog.py uses robust gateway health parsing and treats "service definition outdated" as WARN, not FAIL, when service is active.

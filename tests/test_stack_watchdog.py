@@ -135,3 +135,43 @@ def test_watchdog_detects_multiple_bot_instances(monkeypatch):
     result = stack_watchdog.watchdog(remediate=False)
     assert result["status"] == "fail"
     assert "bot_multiple_instances" in result["issues"]
+
+
+def test_write_incident_if_needed_writes_for_warn(tmp_path, monkeypatch):
+    incidents = tmp_path / "INCIDENTS.md"
+    monkeypatch.setattr(stack_watchdog, "INCIDENTS_FILE", incidents)
+
+    result = {
+        "status": "warn",
+        "issues": [],
+        "actions": ["bot_restart"],
+        "gateway": {"healthy": True},
+        "bot": {"running": True, "pids": [123]},
+        "dashboard": {"healthy": False, "listening": False, "http_ok": False},
+        "startup_grace": True,
+    }
+
+    wrote = stack_watchdog.write_incident_if_needed(result)
+    assert wrote is True
+    text = incidents.read_text(encoding="utf-8")
+    assert "# INCIDENTS" in text
+    assert "bot_restart" in text
+
+
+def test_write_incident_if_needed_skips_clean_ok(tmp_path, monkeypatch):
+    incidents = tmp_path / "INCIDENTS.md"
+    monkeypatch.setattr(stack_watchdog, "INCIDENTS_FILE", incidents)
+
+    result = {
+        "status": "ok",
+        "issues": [],
+        "actions": [],
+        "gateway": {"healthy": True},
+        "bot": {"running": True, "pids": [123]},
+        "dashboard": {"healthy": True, "listening": True, "http_ok": True},
+        "startup_grace": False,
+    }
+
+    wrote = stack_watchdog.write_incident_if_needed(result)
+    assert wrote is False
+    assert not incidents.exists()
