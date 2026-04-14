@@ -244,6 +244,49 @@ class TestBacktester:
         
         # Should have at least one trade
         assert result.total_trades >= 1
+
+    @patch("backtester.config")
+    def test_backtester_threshold_requires_min_trades(self, mock_config):
+        """Even strong metrics should fail activation when trade sample is too small."""
+        from datetime import datetime, timedelta, timezone
+        from backtester import Backtester, BacktestTrade
+
+        mock_config.INITIAL_CAPITAL = 10000
+        mock_config.MAX_STRATEGIES = 7
+        mock_config.TRADING_FEE = 0.001
+        mock_config.SLIPPAGE = 0.0003
+        mock_config.DEFAULT_STOP_LOSS_PCT = 0.025
+        mock_config.DEFAULT_TAKE_PROFIT_PCT = 0.055
+        mock_config.MAX_POSITION_PCT = 0.35
+        mock_config.MIN_CAGR_THRESHOLD = -1.0
+        mock_config.MIN_WIN_RATE = 0.0
+        mock_config.MIN_PROFIT_FACTOR = 0.0
+        mock_config.MIN_BACKTEST_TRADES = 5
+
+        df = self._make_df(300)
+        strategy = MockStrategy("TinySample", min_candles=50, signal_frequency=0.0)
+        bt = Backtester(strategy, df, initial_capital=1000)
+
+        t0 = datetime.now(timezone.utc)
+        tiny_sample = [
+            BacktestTrade(
+                side="LONG",
+                entry_price=100.0,
+                exit_price=120.0,
+                quantity=1.0,
+                pnl=20.0,
+                pnl_pct=0.20,
+                fees=0.0,
+                entry_time=t0,
+                exit_time=t0 + timedelta(hours=1),
+                duration_hours=1.0,
+                exit_reason="TAKE_PROFIT",
+            )
+        ]
+
+        result = bt._compute_metrics(tiny_sample, [1000.0, 1020.0], n_candles=300)
+        assert result.total_trades == 1
+        assert result.passes_threshold is False
     
     def test_check_exit_long_stop_loss(self):
         """Test _check_exit for LONG position hitting stop loss."""

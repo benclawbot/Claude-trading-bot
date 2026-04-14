@@ -5,6 +5,7 @@ Opens: dashboard_export.html
 """
 
 import sys, os, json
+import html
 sys.path.insert(0, os.path.dirname(__file__))
 
 import database as db
@@ -140,20 +141,35 @@ for i, strat in enumerate(strategies):
 # ── fig4: P&L histogram ───────────────────────────────────────────────────────
 if trades:
     tdf   = pd.DataFrame(trades)
-    pnls  = tdf["pnl"].astype(float)
-    colors_hist = [GREEN if p >= 0 else RED for p in pnls]
-    fig_hist = go.Figure(go.Histogram(
-        x=pnls, nbinsx=30,
-        marker_color=[GREEN if p >= 0 else RED for p in pnls],
-        opacity=0.85,
-    ))
+    fees  = tdf.get("fees_paid", pd.Series([0.0] * len(tdf))).astype(float)
+    pnls  = tdf["pnl"].astype(float) - fees
+    pos_pnls = pnls[pnls >= 0]
+    neg_pnls = pnls[pnls < 0]
+    fig_hist = go.Figure()
+    if len(pos_pnls):
+        fig_hist.add_trace(go.Histogram(
+            x=pos_pnls, nbinsx=30,
+            name="Wins",
+            marker_color=GREEN,
+            opacity=0.9,
+            hovertemplate="P&L: %{x:.2f}<br>Count: %{y}<extra>Wins</extra>",
+        ))
+    if len(neg_pnls):
+        fig_hist.add_trace(go.Histogram(
+            x=neg_pnls, nbinsx=30,
+            name="Losses",
+            marker_color=RED,
+            opacity=0.9,
+            hovertemplate="P&L: %{x:.2f}<br>Count: %{y}<extra>Losses</extra>",
+        ))
     fig_hist.update_layout(**LAYOUT, title="P&L Distribution",
                            title_font_color=BLUE, height=230,
-                           xaxis_title="P&L ($)", yaxis_title="Trades")
+                           xaxis_title="P&L ($)", yaxis_title="Trades",
+                           barmode="overlay", showlegend=True)
 
     # Cumulative PnL
     tdf_s  = tdf.sort_values("exit_time")
-    cum    = tdf_s["pnl"].astype(float).cumsum().values
+    cum    = (tdf_s["pnl"].astype(float) - tdf_s.get("fees_paid", pd.Series([0.0] * len(tdf_s))).astype(float)).cumsum().values
     fig_cum = go.Figure(go.Scatter(
         x=list(range(len(cum))), y=cum,
         fill="tozeroy", line=dict(color=BLUE, width=2),
@@ -177,8 +193,12 @@ def kpi(label, value, color=TEXT, subtitle=""):
     </div>"""
 
 def trade_row(t):
-    pnl = float(t["pnl"]); pnl_pct = float(t["pnl_pct"]) * 100
-    color = GREEN if pnl >= 0 else RED
+    gross = float(t["pnl"])
+    fees = float(t.get("fees_paid") or 0.0)
+    net_pnl = gross - fees
+    notional = max(float(t["entry_price"]) * float(t["quantity"]), 1e-9)
+    net_pct = (net_pnl / notional) * 100
+    color = GREEN if net_pnl >= 0 else RED
     side_color = GREEN if t["side"] == "LONG" else RED
     return f"""
     <tr>
@@ -187,11 +207,24 @@ def trade_row(t):
       <td style='color:{side_color}'>{t['side']}</td>
       <td>${float(t['entry_price']):,.0f}</td>
       <td>${float(t['exit_price']):,.0f}</td>
-      <td style='color:{color}'>${pnl:+,.2f}</td>
-      <td style='color:{color}'>{pnl_pct:+.2f}%</td>
+      <td style='color:{color}'>${net_pnl:+,.2f}</td>
+      <td style='color:{color}'>{net_pct:+.2f}%</td>
       <td>{float(t['duration_hours']):.1f}h</td>
       <td style='color:{SUB}'>{t.get('exit_reason','')}</td>
     </tr>"""
+
+
+def _lessons_html(entry):
+    """Return lessons as an HTML <ul> string, or empty string if no lessons."""
+    lessons = entry.get("lessons") or []
+    if not lessons:
+        return ""
+    items = "".join(
+        f"<li style='color:{TEXT};font-size:12px'>{html.escape(str(l))}</li>"
+        for l in lessons
+    )
+    return f"<ul style='padding-left:18px;margin:0'>{items}</ul>"
+
 
 def journal_card(e):
     pnl = float(e.get("pnl") or 0)
@@ -220,7 +253,7 @@ def journal_card(e):
         </div>
         <div>
           <div style='color:{PURPLE};font-size:12px;margin-bottom:4px'><b>Lessons</b></div>
-          <div style='color:{TEXT};font-size:12px'>{e.get("lessons","")}</div>
+          {_lessons_html(e)}
         </div>
       </div>
     </div>"""
@@ -449,3 +482,5 @@ with open(out, "w") as f:
 
 size = os.path.getsize(out) / 1024
 print(f"Saved: {out}  ({size:.0f} KB)")
+
+

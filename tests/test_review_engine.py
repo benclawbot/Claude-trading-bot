@@ -100,3 +100,42 @@ def test_evaluate_experiment_kill_on_hard_drawdown():
 
     assert result["decision"] == "KILL"
     assert "drawdown" in result["decision_reason"].lower()
+
+
+def test_apply_experiment_lane_scheduler_enforces_min_active(monkeypatch):
+    monkeypatch.setattr(review_engine.config, "EXPERIMENT_LANE_ENABLED", True)
+    monkeypatch.setattr(review_engine.config, "EXPERIMENT_LANE_SCHEDULER_ENABLED", True)
+    monkeypatch.setattr(review_engine.config, "EXPERIMENT_LANE_STRATEGIES", {"A", "B", "C"})
+    monkeypatch.setattr(review_engine.config, "EXPERIMENT_LANE_MIN_ACTIVE", 2)
+
+    rows = [
+        {"name": "A", "is_active": 1, "backtest_cagr": 0.10},
+        {"name": "B", "is_active": 1, "backtest_cagr": 0.08},
+        {"name": "C", "is_active": 0, "backtest_cagr": 0.12},
+    ]
+    updates = []
+
+    monkeypatch.setattr(review_engine.db, "get_all_strategies", lambda: rows)
+    monkeypatch.setattr(review_engine.db, "set_strategy_active", lambda name, flag: updates.append((name, flag)))
+
+    evaluated = [
+        {"strategy_name": "A", "decision": "KILL", "score_total": 10},
+        {"strategy_name": "B", "decision": "KEEP_TESTING", "score_total": 65},
+        {"strategy_name": "C", "decision": "PROMOTE", "score_total": 90},
+    ]
+
+    result = review_engine.apply_experiment_lane_scheduler(evaluated)
+
+    assert result["applied"] is True
+    assert result["lane_active_after"] == 2
+    assert any(c["strategy"] == "A" and c["to"] is False for c in result["changes"])
+    assert ("A", False) in updates
+
+
+def test_apply_experiment_lane_scheduler_disabled(monkeypatch):
+    monkeypatch.setattr(review_engine.config, "EXPERIMENT_LANE_ENABLED", False)
+    result = review_engine.apply_experiment_lane_scheduler([])
+    assert result["applied"] is False
+    assert result["reason"] == "lane_disabled"
+
+

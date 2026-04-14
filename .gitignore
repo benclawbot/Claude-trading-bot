@@ -7,9 +7,17 @@ __pycache__/
 .env.*
 *.log
 *.log.*
+trading_bot.lock
 .coverage
 .coverage.*
 htmlcov/
+
+# Local Python env + tool caches
+.venv/
+pytest_cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Local bot state / artifacts
 .canary_last.json
@@ -19,3 +27,4 @@ models/*.pkl
 # Prevent accidental OS path artifacts
 *\\*
 *:*
+

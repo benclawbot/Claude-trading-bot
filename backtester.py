@@ -140,7 +140,7 @@ class Backtester:
                 window = df.iloc[max(0, i - strat.min_candles): i + 1]
                 signal: Signal = strat.generate_signal(window)
 
-                if signal.is_actionable and signal.confidence >= 0.45:
+                if signal.is_actionable and signal.confidence >= float(getattr(config, "BACKTEST_MIN_SIGNAL_CONFIDENCE", 0.45)):
                     qty_capital = capital * max_pos_pct * signal.confidence
                     qty_capital = min(qty_capital, capital * 0.60)   # hard cap
                     quantity    = qty_capital / close
@@ -286,7 +286,9 @@ class Backtester:
         else:
             sr = sortino = 0.0
 
+        min_trades = int(getattr(config, "MIN_BACKTEST_TRADES", 1))
         passes = (
+            len(trades) >= min_trades and
             cagr >= config.MIN_CAGR_THRESHOLD and
             win_rate >= config.MIN_WIN_RATE and
             pf >= config.MIN_PROFIT_FACTOR

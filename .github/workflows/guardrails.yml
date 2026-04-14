@@ -1,0 +1,17 @@
+name: guardrails
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  no-root-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Enforce no root test files
+        run: python scripts/check_no_root_tests.py

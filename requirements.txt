@@ -6,6 +6,9 @@ scikit-learn>=1.3
 # Binance (optional — only needed for live/testnet order execution)
 python-binance>=1.0.17
 
+# Multi-exchange unified API
+ccxt>=4.5.48
+
 # HTTP client for public Binance API (market data)
 requests>=2.31
 

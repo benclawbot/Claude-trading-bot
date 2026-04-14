@@ -107,6 +107,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["macd"], df["macd_signal"], df["macd_hist"] = _macd(c)
     df["ema_9"]   = _ema(c, 9)
     df["ema_21"]  = _ema(c, 21)
+    df["ema_49"]  = _ema(c, 49)
     df["ema_50"]  = _ema(c, 50)
     df["ema_100"] = _ema(c, 100)
     df["ema_200"] = _ema(c, 200)
@@ -118,6 +119,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_upper"], df["bb_middle"], df["bb_lower"], df["bb_width"], df["bb_pct"] = \
         _bollinger(c, 20, 2.0)
     df["atr_14"] = _atr(h, l, c, 14)
+    df["atr_5"]  = _atr(h, l, c, 5)   # ATR(5) for Supertrend-based strategies
 
     # ── Volume ────────────────────────────────────────────────────────────────
     df["volume_sma_20"] = _sma(v, 20)

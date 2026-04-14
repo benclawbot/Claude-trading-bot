@@ -1,0 +1,34 @@
+{
+  "status": "PASS",
+  "window": {
+    "current": "2026-04-03T21:00:06.469329+00:00 -> 2026-04-10T21:00:06.469329+00:00",
+    "prior": "2026-03-27T21:00:06.469329+00:00 -> 2026-04-03T21:00:06.469329+00:00"
+  },
+  "current": {
+    "runs": 57,
+    "ok": 0,
+    "warn": 0,
+    "fail": 0,
+    "action_runs": 0,
+    "fail_rate": 0.0,
+    "warn_rate": 0.0,
+    "action_rate": 0.0
+  },
+  "prior": {
+    "runs": 0,
+    "ok": 0,
+    "warn": 0,
+    "fail": 0,
+    "action_runs": 0,
+    "fail_rate": 0.0,
+    "warn_rate": 0.0,
+    "action_rate": 0.0
+  },
+  "deltas": {
+    "fail_rate": 0.0,
+    "warn_rate": 0.0,
+    "action_rate": 0.0
+  },
+  "top_incident_causes": [],
+  "reasons": []
+}

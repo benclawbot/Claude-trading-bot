@@ -1,6 +1,8 @@
 """Central configuration for the BTC Paper Trading Bot."""
 
+import json
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,10 +16,18 @@ USE_TESTNET        = os.getenv("USE_TESTNET", "true").lower() == "true"
 TESTNET_REST_URL = "https://testnet.binance.vision/api"
 TESTNET_WS_URL   = "wss://testnet.binance.vision/ws"
 
+# Multi-exchange market data backend
+EXCHANGE_DATA_BACKEND = os.getenv("EXCHANGE_DATA_BACKEND", "ccxt").lower()  # binance|ccxt
+EXCHANGE_ID = os.getenv("EXCHANGE_ID", "binance").lower()  # ccxt exchange id (binance, kraken, bybit...)
+
 # ─── Trading Mode ──────────────────────────────────────────────────────────────
 # PAPER_TRADING=true  → simulate orders at real Binance prices (default, safe)
 # PAPER_TRADING=false → live/testnet order execution (requires API keys)
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() == "true"
+# When true, paper orders log the equivalent ccxt live payload for parity checks.
+PAPER_LIVE_PARITY_CHECK = os.getenv("PAPER_LIVE_PARITY_CHECK", "true").lower() == "true"
+# OCO handling mode: auto (try exchange OCO on supported backends), exchange (force exchange OCO), managed (always internal SL/TP)
+OCO_EXECUTION_MODE = os.getenv("OCO_EXECUTION_MODE", "auto").lower()
 
 # ─── Trading Parameters ────────────────────────────────────────────────────────
 SYMBOL             = "BTCUSDT"
@@ -42,18 +52,26 @@ EXPERIMENT_LANE_CAP_PCT = float(os.getenv("EXPERIMENT_LANE_CAP_PCT", "0.30"))
 EXPERIMENT_LANE_STRATEGIES = {
     s.strip() for s in os.getenv(
         "EXPERIMENT_LANE_STRATEGIES",
-        "MACD_Momentum,EMA_Crossover,RSI_Bollinger,Breakout"
+        "MACD_Momentum,EMA_Crossover,RSI_Bollinger,Breakout,Scalper_5m"
     ).split(",") if s.strip()
 }
+EXPERIMENT_LANE_SCHEDULER_ENABLED = os.getenv("EXPERIMENT_LANE_SCHEDULER_ENABLED", "true").lower() == "true"
+EXPERIMENT_LANE_MIN_ACTIVE = int(os.getenv("EXPERIMENT_LANE_MIN_ACTIVE", "2"))
+EXPERIMENT_LANE_POSITION_MULTIPLIER = float(os.getenv("EXPERIMENT_LANE_POSITION_MULTIPLIER", "0.75"))
+CORE_LANE_POSITION_MULTIPLIER = float(os.getenv("CORE_LANE_POSITION_MULTIPLIER", "1.00"))
 
 # Experiment mode: allow selected strategies to run in low-capital data-collection
 # mode even when they fail the normal backtest pass thresholds.
 EXPERIMENT_MODE_ENABLED = os.getenv("EXPERIMENT_MODE_ENABLED", "false").lower() == "true"
+# Capital allocation mode:
+# - equal (default): same base capital share per active strategy
+# - experiment_weighted: reserve EXPERIMENT_MODE_CAPITAL_PCT for experiment strategies
+CAPITAL_ALLOCATION_MODE = os.getenv("CAPITAL_ALLOCATION_MODE", "equal").lower()
 EXPERIMENT_MODE_CAPITAL_PCT = float(os.getenv("EXPERIMENT_MODE_CAPITAL_PCT", "0.20"))
 EXPERIMENT_MODE_STRATEGIES = {
     s.strip() for s in os.getenv(
         "EXPERIMENT_MODE_STRATEGIES",
-        "MACD_Momentum,EMA_Crossover"
+        "MACD_Momentum,EMA_Crossover,Bollinger_MeanRev"
     ).split(",") if s.strip()
 }
 
@@ -62,10 +80,49 @@ TRADING_FEE = 0.001   # 0.1% Binance spot fee
 SLIPPAGE    = 0.0003  # 0.03% estimated slippage (conservative)
 
 # ─── Backtesting ───────────────────────────────────────────────────────────────
-BACKTEST_DAYS          = 500   # 500 days – needed for SMA-250 on daily strategies
-MIN_CAGR_THRESHOLD     = 0.05  # Require ≥5% annualised CAGR to activate a strategy
-MIN_WIN_RATE           = 0.32  # 32% minimum – allow lower WR strategies with high R:R
-MIN_PROFIT_FACTOR      = 1.20  # Min gross profit / gross loss ratio
+BACKTEST_DAYS                 = 500   # 500 days – needed for SMA-250 on daily strategies
+MIN_CAGR_THRESHOLD            = 0.05  # Require ≥5% annualised CAGR to activate a strategy
+MIN_WIN_RATE                  = 0.32  # 32% minimum – allow lower WR strategies with high R:R
+MIN_PROFIT_FACTOR             = 1.20  # Min gross profit / gross loss ratio
+MIN_BACKTEST_TRADES           = int(os.getenv("MIN_BACKTEST_TRADES", "12"))
+BACKTEST_MIN_SIGNAL_CONFIDENCE = float(os.getenv("BACKTEST_MIN_SIGNAL_CONFIDENCE", "0.45"))
+AUTORESEARCH_TARGET_TRADES_PER_DAY = float(os.getenv("AUTORESEARCH_TARGET_TRADES_PER_DAY", "20"))
+AUTORESEARCH_MIN_ROBUSTNESS = float(os.getenv("AUTORESEARCH_MIN_ROBUSTNESS", "0.55"))
+AUTORESEARCH_WALK_FORWARD_WINDOWS = int(os.getenv("AUTORESEARCH_WALK_FORWARD_WINDOWS", "3"))
+AUTORESEARCH_OBJECTIVE_MODE = os.getenv("AUTORESEARCH_OBJECTIVE_MODE", "individual").lower()
+
+# ─── Regime router (enable strategy families only when market state fits) ─────
+REGIME_ROUTER_ENABLED = os.getenv("REGIME_ROUTER_ENABLED", "true").lower() == "true"
+REGIME_ROUTER_FAMILY_BY_STRATEGY = {
+    "EMA5_Momentum": "trend",
+    "DualMA_Crossover": "trend",
+    "Regime_RiskOnOff": "adaptive",
+    "PriceMomentum_25": "trend",
+    "Residual_MeanRev": "mean_reversion",
+    "Donchian_Breakout": "breakout",
+    "Blended_MomentumMR": "adaptive",
+    "RSI_Bollinger": "mean_reversion",
+    "Breakout": "breakout",
+    "MACD_Momentum": "trend",
+    "EMA_Crossover": "trend",
+    "Scalper_5m": "scalper",
+    "Supertrend_ATR": "trend",
+    "ML_Adaptive": "adaptive",
+    "Bollinger_MeanRev": "mean_reversion",
+}
+REGIME_ROUTER_ALLOWED_FAMILIES = {
+    "TRENDING_UP": ["trend", "breakout", "adaptive", "scalper"],
+    "TRENDING_DOWN": ["trend", "breakout", "adaptive", "scalper"],
+    "RANGING": ["mean_reversion", "adaptive", "scalper"],
+    "VOLATILE": ["breakout", "adaptive", "scalper"],
+}
+
+# ─── Correlation guard ────────────────────────────────────────────────────────
+CORRELATION_GUARD_ENABLED = os.getenv("CORRELATION_GUARD_ENABLED", "true").lower() == "true"
+CORRELATION_LOOKBACK_TRADES = int(os.getenv("CORRELATION_LOOKBACK_TRADES", "60"))
+CORRELATION_MIN_POINTS = int(os.getenv("CORRELATION_MIN_POINTS", "8"))
+CORRELATION_THRESHOLD = float(os.getenv("CORRELATION_THRESHOLD", "0.75"))
+CORRELATION_SIZE_PENALTY = float(os.getenv("CORRELATION_SIZE_PENALTY", "0.50"))
 
 # ─── Learning Engine ───────────────────────────────────────────────────────────
 MIN_TRADES_FOR_LEARNING = 10    # start ML tuning after N trades
@@ -80,6 +137,10 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 STRATEGY_CHECK_INTERVAL_SEC = 60    # check for new signals every 60s
 POSITION_CHECK_INTERVAL_SEC = 20    # check SL/TP every 20s
 LEARNING_UPDATE_INTERVAL_SEC = 180  # run learning update every 3 minutes
+PRICE_CACHE_MAX_STALE_SEC = int(os.getenv("PRICE_CACHE_MAX_STALE_SEC", "900"))
+PRICE_SANITY_MAX_JUMP_PCT = float(os.getenv("PRICE_SANITY_MAX_JUMP_PCT", "0.08"))
+STALE_PRICE_ENTRY_PAUSE_SEC = int(os.getenv("STALE_PRICE_ENTRY_PAUSE_SEC", "120"))
+STALE_PRICE_WARN_INTERVAL_SEC = int(os.getenv("STALE_PRICE_WARN_INTERVAL_SEC", "60"))
 
 # ─── Database ──────────────────────────────────────────────────────────────────
 DB_PATH = os.path.join(os.path.dirname(__file__), "trading_bot.db")
@@ -92,6 +153,17 @@ DASHBOARD_UPDATE_MS = 10000   # refresh every 10 seconds
 # ─── Logging ───────────────────────────────────────────────────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE  = os.path.join(os.path.dirname(__file__), "trading_bot.log")
+
+# ─── TradingView MCP (optional) ────────────────────────────────────────────────
+# Enable integration with tradingview-mcp-server for macro sentiment + extended TA.
+# Run: pip install tradingview-mcp-server
+TV_MCP_ENABLED = os.getenv("TV_MCP_ENABLED", "true").lower() == "true"
+# Check BTC Reddit sentiment before placing a trade (blocks if deeply bearish)
+TV_PRE_TRADE_SENTIMENT_CHECK = os.getenv("TV_PRE_TRADE_SENTIMENT_CHECK", "false").lower() == "true"
+# Block new entries when BTC sentiment score is below this threshold (-1 to +1)
+TV_SENTIMENT_BLOCK_THRESHOLD = float(os.getenv("TV_SENTIMENT_BLOCK_THRESHOLD", "-0.5"))
+# Include TV macro data in journal entries
+TV_ENRICH_JOURNAL = os.getenv("TV_ENRICH_JOURNAL", "true").lower() == "true"
 
 # ─── Data Management ────────────────────────────────────────────────────────────
 # Set to "true" to clear all trading data on startup and start fresh
@@ -215,6 +287,20 @@ STRATEGY_PARAMS = {
         "atr_tp_mult":     4.0,
         "candle_interval": "1h",
     },
+    "Scalper_5m": {
+        # Template: fast intraday momentum/reversion hybrid for experiment lane.
+        # Entry LONG  : EMA9 > EMA21, RSI recovering from oversold, positive volume shock.
+        # Entry SHORT : EMA9 < EMA21, RSI fading from overbought, positive volume shock.
+        "ema_fast":         9,
+        "ema_slow":         21,
+        "rsi_period":       14,
+        "rsi_long_max":     45,
+        "rsi_short_min":    55,
+        "volume_ratio_min": 1.15,
+        "atr_sl_mult":      0.8,
+        "atr_tp_mult":      1.2,
+        "candle_interval":  "5m",
+    },
     "Blended_MomentumMR": {
         # Source  : Medium – 50/50 momentum + mean-reversion portfolio (best risk-adj)
         # Momentum: 25-period close-to-close (pre-2021 dominant)
@@ -229,7 +315,74 @@ STRATEGY_PARAMS = {
         "atr_tp_mult":      3.0,
         "candle_interval":  "4h",
     },
+    "Supertrend_ATR": {
+        # Source  : User's TradingView Pine Script (Supertrend ATR + EMA49 filter)
+        # Entry LONG  : Supertrend trend flips -1→+1  AND  close > EMA49
+        # Entry SHORT : Supertrend trend flips +1→-1  AND  close < EMA49
+        # Tuned defaults from 500-day BTC sweep (Apr 2026): lower drawdown / better PF
+        "atr_period":      5,
+        "atr_mult":        1.8,
+        "ema_period":      49,
+        "atr_sl_mult":     1.0,
+        "atr_tp_mult":     2.0,
+        "candle_interval": "4h",
+    },
+    "Bollinger_MeanRev": {
+        # Source  : 2025 thesis – hourly Bollinger-band mean reversion (Oct 2020 – Nov 2025)
+        # Entry LONG  : hourly close falls below 20-period BB lower band (2 std)
+        # Exit        : hourly close crosses back above 20-period BB middle SMA
+        # Annual ret  : 106.8 % gross / ~74.8 % at 0.1 % fee  |  Sharpe 1.86  |  Max DD -35.6 %
+        # NOTE       : strategy is highly fee-sensitive; use low-fee venues (Binance spot 0.1 %)
+        "bb_period":       20,
+        "bb_std":          2.0,
+        "atr_sl_mult":     2.5,
+        "atr_tp_mult":     5.0,
+        "candle_interval": "1h",
+    },
 }
+
+
+def _apply_autoresearch_overrides() -> None:
+    """Optional runtime overrides for guardrails and strategy params.
+
+    Enabled only when AUTORESEARCH_USE_OVERRIDES=true.
+    """
+    use_overrides = os.getenv("AUTORESEARCH_USE_OVERRIDES", "false").lower() == "true"
+    if not use_overrides:
+        return
+
+    default_path = Path(__file__).resolve().parent / "ops" / "autoresearch" / "best_config.json"
+    override_path = Path(os.getenv("AUTORESEARCH_OVERRIDES_FILE", str(default_path))).expanduser()
+    if not override_path.exists():
+        return
+
+    try:
+        data = json.loads(override_path.read_text())
+    except Exception:
+        return
+
+    guardrails = data.get("guardrails", {}) if isinstance(data, dict) else {}
+    for key in (
+        "MIN_CAGR_THRESHOLD",
+        "MIN_WIN_RATE",
+        "MIN_PROFIT_FACTOR",
+        "MAX_POSITION_PCT",
+        "DEFAULT_STOP_LOSS_PCT",
+        "DEFAULT_TAKE_PROFIT_PCT",
+        "BACKTEST_MIN_SIGNAL_CONFIDENCE",
+        "AUTORESEARCH_TARGET_TRADES_PER_DAY",
+    ):
+        if key in guardrails:
+            globals()[key] = guardrails[key]
+
+    strategy_params = data.get("strategy_params", {}) if isinstance(data, dict) else {}
+    if isinstance(strategy_params, dict):
+        for strat_name, overrides in strategy_params.items():
+            if strat_name in STRATEGY_PARAMS and isinstance(overrides, dict):
+                STRATEGY_PARAMS[strat_name].update(overrides)
+
+
+_apply_autoresearch_overrides()
 
 
 # ─── Configuration Validation ───────────────────────────────────────────────────
@@ -266,6 +419,31 @@ def validate_config() -> list:
     
     if MIN_CAGR_THRESHOLD < 0:
         errors.append(f"MIN_CAGR_THRESHOLD must be >= 0, got {MIN_CAGR_THRESHOLD}")
+
+    if not 0 <= BACKTEST_MIN_SIGNAL_CONFIDENCE <= 1:
+        errors.append(
+            f"BACKTEST_MIN_SIGNAL_CONFIDENCE must be between 0 and 1, got {BACKTEST_MIN_SIGNAL_CONFIDENCE}"
+        )
+
+    if AUTORESEARCH_TARGET_TRADES_PER_DAY < 1:
+        errors.append(
+            f"AUTORESEARCH_TARGET_TRADES_PER_DAY must be >= 1, got {AUTORESEARCH_TARGET_TRADES_PER_DAY}"
+        )
+
+    if not 0 <= AUTORESEARCH_MIN_ROBUSTNESS <= 1:
+        errors.append(
+            f"AUTORESEARCH_MIN_ROBUSTNESS must be between 0 and 1, got {AUTORESEARCH_MIN_ROBUSTNESS}"
+        )
+
+    if AUTORESEARCH_WALK_FORWARD_WINDOWS < 2:
+        errors.append(
+            f"AUTORESEARCH_WALK_FORWARD_WINDOWS must be >= 2, got {AUTORESEARCH_WALK_FORWARD_WINDOWS}"
+        )
+
+    if AUTORESEARCH_OBJECTIVE_MODE not in {"individual", "portfolio"}:
+        errors.append(
+            f"AUTORESEARCH_OBJECTIVE_MODE must be one of individual|portfolio, got {AUTORESEARCH_OBJECTIVE_MODE}"
+        )
     
     # Validate ML parameters
     if MIN_TRADES_FOR_LEARNING < 5:
@@ -274,6 +452,63 @@ def validate_config() -> list:
     if not 0 <= CONFIDENCE_THRESHOLD <= 1:
         errors.append(f"CONFIDENCE_THRESHOLD must be between 0 and 1, got {CONFIDENCE_THRESHOLD}")
     
+    # Validate lane controls
+    if EXPERIMENT_LANE_MIN_ACTIVE < 0:
+        errors.append(f"EXPERIMENT_LANE_MIN_ACTIVE must be >= 0, got {EXPERIMENT_LANE_MIN_ACTIVE}")
+
+    if PRICE_CACHE_MAX_STALE_SEC <= 0:
+        errors.append(f"PRICE_CACHE_MAX_STALE_SEC must be > 0, got {PRICE_CACHE_MAX_STALE_SEC}")
+
+    if not 0 < PRICE_SANITY_MAX_JUMP_PCT < 1:
+        errors.append(
+            f"PRICE_SANITY_MAX_JUMP_PCT must be between 0 and 1, got {PRICE_SANITY_MAX_JUMP_PCT}"
+        )
+
+    if MIN_BACKTEST_TRADES < 1:
+        errors.append(f"MIN_BACKTEST_TRADES must be >= 1, got {MIN_BACKTEST_TRADES}")
+
+    if STALE_PRICE_ENTRY_PAUSE_SEC <= 0:
+        errors.append(f"STALE_PRICE_ENTRY_PAUSE_SEC must be > 0, got {STALE_PRICE_ENTRY_PAUSE_SEC}")
+
+    if STALE_PRICE_WARN_INTERVAL_SEC <= 0:
+        errors.append(f"STALE_PRICE_WARN_INTERVAL_SEC must be > 0, got {STALE_PRICE_WARN_INTERVAL_SEC}")
+
+    if not 0 < EXPERIMENT_LANE_POSITION_MULTIPLIER <= 1.0:
+        errors.append(
+            f"EXPERIMENT_LANE_POSITION_MULTIPLIER must be in (0, 1], got {EXPERIMENT_LANE_POSITION_MULTIPLIER}"
+        )
+
+    if not 0 < CORE_LANE_POSITION_MULTIPLIER <= 1.5:
+        errors.append(
+            f"CORE_LANE_POSITION_MULTIPLIER must be in (0, 1.5], got {CORE_LANE_POSITION_MULTIPLIER}"
+        )
+
+    if CORRELATION_LOOKBACK_TRADES < 5:
+        errors.append(f"CORRELATION_LOOKBACK_TRADES must be >= 5, got {CORRELATION_LOOKBACK_TRADES}")
+
+    if CORRELATION_MIN_POINTS < 3:
+        errors.append(f"CORRELATION_MIN_POINTS must be >= 3, got {CORRELATION_MIN_POINTS}")
+
+    if not 0 <= CORRELATION_THRESHOLD <= 1:
+        errors.append(f"CORRELATION_THRESHOLD must be between 0 and 1, got {CORRELATION_THRESHOLD}")
+
+    if not 0 < CORRELATION_SIZE_PENALTY <= 1:
+        errors.append(f"CORRELATION_SIZE_PENALTY must be in (0, 1], got {CORRELATION_SIZE_PENALTY}")
+
+    # Validate market data backend
+    if EXCHANGE_DATA_BACKEND not in {"binance", "ccxt"}:
+        errors.append(
+            f"EXCHANGE_DATA_BACKEND must be 'binance' or 'ccxt', got {EXCHANGE_DATA_BACKEND}"
+        )
+
+    if OCO_EXECUTION_MODE not in {"auto", "exchange", "managed"}:
+        errors.append(f"OCO_EXECUTION_MODE must be auto|exchange|managed, got {OCO_EXECUTION_MODE}")
+
+    if CAPITAL_ALLOCATION_MODE not in {"equal", "experiment_weighted"}:
+        errors.append(
+            f"CAPITAL_ALLOCATION_MODE must be equal|experiment_weighted, got {CAPITAL_ALLOCATION_MODE}"
+        )
+
     # Validate API credentials for live trading
     if not PAPER_TRADING:
         if not BINANCE_API_KEY or not BINANCE_API_SECRET:
@@ -308,3 +543,6 @@ if _config_errors:
     logger = logging.getLogger("config")
     for error in _config_errors:
         logger.warning(f"Config validation: {error}")
+
+
+

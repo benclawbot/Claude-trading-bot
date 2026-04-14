@@ -10,8 +10,9 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
+import config
 import database as db
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,74 @@ def _risk_trigger_level(weekly_dd_pct: float) -> Optional[float]:
     return None
 
 
+def _decision_rank(decision: str) -> int:
+    return {
+        "PROMOTE": 5,
+        "KEEP_TESTING": 4,
+        "DEMOTE": 3,
+        "INSUFFICIENT_DATA": 2,
+        "KILL": 1,
+    }.get(decision, 0)
+
+
+def apply_experiment_lane_scheduler(evaluated: List[Dict[str, object]]) -> Dict[str, object]:
+    """Apply experiment-lane activation updates with min-active guard."""
+    if not getattr(config, "EXPERIMENT_LANE_ENABLED", False):
+        return {"applied": False, "reason": "lane_disabled"}
+    if not getattr(config, "EXPERIMENT_LANE_SCHEDULER_ENABLED", True):
+        return {"applied": False, "reason": "scheduler_disabled"}
+
+    lane_names = {s.strip() for s in getattr(config, "EXPERIMENT_LANE_STRATEGIES", set()) if s and s.strip()}
+    if not lane_names:
+        return {"applied": False, "reason": "lane_empty"}
+
+    min_active = max(0, int(getattr(config, "EXPERIMENT_LANE_MIN_ACTIVE", 0)))
+    strategy_rows = [s for s in db.get_all_strategies() if s.get("name") in lane_names]
+    if not strategy_rows:
+        return {"applied": False, "reason": "no_persisted_lane_strategies", "lane_names": sorted(lane_names)}
+
+    decision_by_name = {str(d.get("strategy_name")): d for d in evaluated if d.get("strategy_name")}
+
+    def sort_key(row: Dict[str, object]):
+        name = str(row.get("name"))
+        decision = str(decision_by_name.get(name, {}).get("decision", "INSUFFICIENT_DATA"))
+        score_total = float(decision_by_name.get(name, {}).get("score_total", 0.0))
+        backtest = float(row.get("backtest_cagr", 0.0) or 0.0)
+        was_active = int(bool(row.get("is_active")))
+        return (_decision_rank(decision), score_total, backtest, was_active)
+
+    ranked = sorted(strategy_rows, key=sort_key, reverse=True)
+    active_target = {
+        str(r.get("name"))
+        for r in ranked
+        if str(decision_by_name.get(str(r.get("name")), {}).get("decision", "INSUFFICIENT_DATA")) != "KILL"
+    }
+
+    if len(active_target) < min_active:
+        for row in ranked:
+            name = str(row.get("name"))
+            active_target.add(name)
+            if len(active_target) >= min_active:
+                break
+
+    changes = []
+    for row in strategy_rows:
+        name = str(row.get("name"))
+        new_active = name in active_target
+        old_active = bool(row.get("is_active"))
+        if new_active != old_active:
+            db.set_strategy_active(name, new_active)
+            changes.append({"strategy": name, "from": old_active, "to": new_active})
+
+    return {
+        "applied": True,
+        "lane_count": len(strategy_rows),
+        "lane_active_after": sum(1 for r in strategy_rows if str(r.get("name")) in active_target),
+        "min_active": min_active,
+        "changes": changes,
+    }
+
+
 def run_auto_review(baseline_version: str = "auto", days: int = 7,
                     now: Optional[datetime] = None) -> Dict[str, object]:
     now = now or datetime.now(timezone.utc)
@@ -230,6 +299,7 @@ def run_auto_review(baseline_version: str = "auto", days: int = 7,
         score = evaluate_experiment(exp_metrics, portfolio)
         payload = {
             "experiment_id": experiment_id,
+            "strategy_name": strategy_name,
             "week_id": week_id,
             "baseline_version": baseline_version,
             "weekly_pnl_pct": exp_metrics["weekly_pnl_pct"],
@@ -253,12 +323,15 @@ def run_auto_review(baseline_version: str = "auto", days: int = 7,
         db.upsert_experiment_run(payload)
         evaluated.append(payload)
 
+    lane_scheduler = apply_experiment_lane_scheduler(evaluated)
+
     return {
         "week_id": week_id,
         "portfolio_weekly_dd_pct": weekly_dd,
         "size_multiplier": size_multiplier,
         "strategies_evaluated": len(evaluated),
         "decisions": {d["experiment_id"]: d["decision"] for d in evaluated},
+        "lane_scheduler": lane_scheduler,
     }
 
 
@@ -286,3 +359,7 @@ def maybe_run_scheduled_review(now: Optional[datetime] = None) -> Dict[str, obje
         summary["size_multiplier"],
     )
     return {"ran": True, **summary}
+
+
+
+

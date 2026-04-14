@@ -367,11 +367,11 @@ class TestJournalEntryBuilder:
             exit_reason="STOP_LOSS",
             feature_vec=[0.5]*12,
         )
-        
-        assert isinstance(lessons, str)
+
+        assert isinstance(lessons, list)
         assert len(lessons) > 0
-        assert "RSI_Bollinger" in lessons
-        assert "trending" in lessons.lower()
+        assert any("RSI_Bollinger" in l for l in lessons)
+        assert any("trending" in l.lower() for l in lessons)
     
     @patch("learning_engine.db")
     @patch("learning_engine.config")
@@ -395,10 +395,10 @@ class TestJournalEntryBuilder:
             exit_reason="STOP_LOSS",
             feature_vec=[0.5]*12,
         )
-        
-        assert isinstance(lessons, str)
+
+        assert isinstance(lessons, list)
         assert len(lessons) > 0
-        assert "stopped out" in lessons.lower() or "stop" in lessons.lower()
+        assert any("stopped out" in l.lower() or "stop" in l.lower() for l in lessons)
     
     @patch("learning_engine.db")
     @patch("learning_engine.config")
@@ -422,9 +422,9 @@ class TestJournalEntryBuilder:
             exit_reason="STOP_LOSS",
             feature_vec=[0.5]*12,
         )
-        
-        assert isinstance(lessons, str)
-        assert "stopped out" in lessons.lower() or "stop" in lessons.lower()
+
+        assert isinstance(lessons, list)
+        assert any("stopped out" in l.lower() or "stop" in l.lower() for l in lessons)
     
     @patch("learning_engine.db")
     @patch("learning_engine.config")
@@ -448,9 +448,9 @@ class TestJournalEntryBuilder:
             exit_reason="TAKE_PROFIT",
             feature_vec=[0.5]*12,
         )
-        
-        assert isinstance(lessons, str)
-        assert "trailing" in lessons.lower() or "take" in lessons.lower()
+
+        assert isinstance(lessons, list)
+        assert any("trailing" in l.lower() or "take" in l.lower() for l in lessons)
 
 
 class TestStreakInfo:
@@ -514,3 +514,7 @@ class TestStreakInfo:
         info = engine._streak_info(history)
         
         assert "losing streak" in info
+
+
+
+

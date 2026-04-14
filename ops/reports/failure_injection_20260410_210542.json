@@ -1,0 +1,96 @@
+{
+  "timestamp_utc": "2026-04-10T21:01:41.364792+00:00",
+  "scenario": "bot_kill_then_watchdog_remediate",
+  "mode": "execute",
+  "baseline": {
+    "status": "ok",
+    "issues": [],
+    "actions": [],
+    "gateway": {
+      "healthy": true,
+      "warnings": [],
+      "exit_code": 0,
+      "raw": "\u25cf hermes-gateway.service - Hermes Agent Gateway - Messaging Platform Integration\n     Loaded: loaded (/home/thomas/.config/systemd/user/hermes-gateway.service; enabled; preset: enabled)\n    Drop-In: /home/thomas/.config/systemd/user/hermes-gateway.service.d\n             \u2514\u2500override.conf\n     Active: active (running) since Fri 2026-04-10 19:18:16 CEST; 3h 43min ago\n   Main PID: 492226 (python)\n      Tasks: 29 (limit: 4153)\n     Memory: 407.9M (peak: 1.3G swap: 456.3M swap peak: 549.8M)\n        CPU: 18min 2.587s\n     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/hermes-gateway.service\n             \u251c\u2500492226 /home/thomas/Downloads/hermes-agent-enhanced/.venv/bin/python -m hermes_cli.main gateway run --replace\n             \u251c\u2500695487 /home/thomas/Downloads/hermes-agent-enhanced/.venv/bin/python /home/thomas/.hermes/scripts/failure-injection-weekly.py\n             \u251c\u2500695488 ./.venv/bin/python ops/diagnostics/failure_injection_check.py --execute\n             \u251c\u2500695493 ./.venv/bin/python ops/diagnostics/stack_watchdog.py\n             \u251c\u2500695498 /home/thomas/.hermes/hermes-agent/venv/bin/python3 /home/thomas/.local/bin/hermes gateway status\n             \u2514\u2500695503 systemctl --user status hermes-gateway --no-pager\n\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udccb plan      4 task(s)  0.0s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udccb plan      4 task(s)  0.0s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/weekly_reliability_report.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/failure_injection_check.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udd27 patch     /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/README.md  1.8s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/.hermes/scripts/weekly-reliability-report.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/.hermes/scripts/failure-injection-weekly.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udcbb $         python3 -m py_compile /home/thomas/.hermes/scripts/weekly-reliability-report.py /home/thomas/.hermes/scripts/failure-injection-weekly.py /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/weekly_reliability_report.py /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/failure_injection_check.py  0.8s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udcbb $         ./.venv/bin/python ops/diagnostics/weekly_reliability_report.py  0.8s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udcbb $         ./.venv/bin/python ops/diagnostics/failure_injection_check.py  1.6s\n\u2713 User gateway service is running\n\u2713 Systemd linger is enabled (service survives logout)"
+    },
+    "bot": {
+      "running": true,
+      "pids": [
+        623780
+      ],
+      "uptime_seconds": 7310
+    },
+    "dashboard": {
+      "listening": true,
+      "http_ok": true,
+      "healthy": true
+    },
+    "startup_grace": false,
+    "exit_code": 0
+  },
+  "status": "FAIL",
+  "bot_killed_pid": 623780,
+  "remediation": {
+    "status": "fail",
+    "issues": [
+      "bot_multiple_instances"
+    ],
+    "actions": [
+      "bot_start",
+      "bot_dedupe_restart"
+    ],
+    "gateway": {
+      "healthy": true,
+      "warnings": [],
+      "exit_code": 0,
+      "raw": "\u25cf hermes-gateway.service - Hermes Agent Gateway - Messaging Platform Integration\n     Loaded: loaded (/home/thomas/.config/systemd/user/hermes-gateway.service; enabled; preset: enabled)\n    Drop-In: /home/thomas/.config/systemd/user/hermes-gateway.service.d\n             \u2514\u2500override.conf\n     Active: active (running) since Fri 2026-04-10 19:18:16 CEST; 3h 43min ago\n   Main PID: 492226 (python)\n      Tasks: 29 (limit: 4153)\n     Memory: 407.7M (peak: 1.3G swap: 456.3M swap peak: 549.8M)\n        CPU: 18min 3.396s\n     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/hermes-gateway.service\n             \u251c\u2500492226 /home/thomas/Downloads/hermes-agent-enhanced/.venv/bin/python -m hermes_cli.main gateway run --replace\n             \u251c\u2500695487 /home/thomas/Downloads/hermes-agent-enhanced/.venv/bin/python /home/thomas/.hermes/scripts/failure-injection-weekly.py\n             \u251c\u2500695488 ./.venv/bin/python ops/diagnostics/failure_injection_check.py --execute\n             \u251c\u2500695529 ./.venv/bin/python ops/diagnostics/stack_watchdog.py --remediate\n             \u251c\u2500695534 /home/thomas/.hermes/hermes-agent/venv/bin/python3 /home/thomas/.local/bin/hermes gateway status\n             \u2514\u2500695540 systemctl --user status hermes-gateway --no-pager\n\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udccb plan      4 task(s)  0.0s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udccb plan      4 task(s)  0.0s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/weekly_reliability_report.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/failure_injection_check.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udd27 patch     /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/README.md  1.8s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/.hermes/scripts/weekly-reliability-report.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \u270d\ufe0f  write     /home/thomas/.hermes/scripts/failure-injection-weekly.py  1.4s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udcbb $         python3 -m py_compile /home/thomas/.hermes/scripts/weekly-reliability-report.py /home/thomas/.hermes/scripts/failure-injection-weekly.py /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/weekly_reliability_report.py /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/diagnostics/failure_injection_check.py  0.8s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udcbb $         ./.venv/bin/python ops/diagnostics/weekly_reliability_report.py  0.8s\nApr 10 23:00:27 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udcbb $         ./.venv/bin/python ops/diagnostics/failure_injection_check.py  1.6s\n\u2713 User gateway service is running\n\u2713 Systemd linger is enabled (service survives logout)"
+    },
+    "bot": {
+      "running": true,
+      "pids": [
+        695950,
+        696746
+      ],
+      "uptime_seconds": 109
+    },
+    "dashboard": {
+      "listening": true,
+      "http_ok": true,
+      "healthy": true
+    },
+    "startup_grace": false,
+    "incident_logged": "/home/thomas/Dropbox/Projects/Claude-trading-bot/ops/INCIDENTS.md",
+    "exit_code": 2
+  },
+  "post_check": {
+    "status": "fail",
+    "issues": [
+      "bot_multiple_instances"
+    ],
+    "actions": [],
+    "gateway": {
+      "healthy": true,
+      "warnings": [],
+      "exit_code": 0,
+      "raw": "\u25cf hermes-gateway.service - Hermes Agent Gateway - Messaging Platform Integration\n     Loaded: loaded (/home/thomas/.config/systemd/user/hermes-gateway.service; enabled; preset: enabled)\n    Drop-In: /home/thomas/.config/systemd/user/hermes-gateway.service.d\n             \u2514\u2500override.conf\n     Active: active (running) since Fri 2026-04-10 19:18:16 CEST; 3h 47min ago\n   Main PID: 492226 (python)\n      Tasks: 39 (limit: 4153)\n     Memory: 640.7M (peak: 1.3G swap: 453.9M swap peak: 549.8M)\n        CPU: 19min 41.616s\n     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/hermes-gateway.service\n             \u251c\u2500492226 /home/thomas/Downloads/hermes-agent-enhanced/.venv/bin/python -m hermes_cli.main gateway run --replace\n             \u251c\u2500695488 ./.venv/bin/python ops/diagnostics/failure_injection_check.py --execute\n             \u251c\u2500695950 ./.venv/bin/python main.py\n             \u251c\u2500701951 ./.venv/bin/python ops/diagnostics/stack_watchdog.py\n             \u251c\u2500701962 /home/thomas/.hermes/hermes-agent/venv/bin/python3 /home/thomas/.local/bin/hermes gateway status\n             \u2514\u2500701972 systemctl --user status hermes-gateway --no-pager\n\nApr 10 23:04:15 thomas-MacBookAir6-2 python[492226]:   [tool] (\u2267\u25e1\u2266) \ud83d\udd0e failure_injection_*.json\nApr 10 23:04:16 thomas-MacBookAir6-2 python[492226]:   [done] \u250a \ud83d\udd0e find      failure_injection_*.json  0.9s (1.0s)\nApr 10 23:04:19 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83e\udde0 memory    -user: \"guided coaching with one question at a time to find their ikigai\"  0.0s\nApr 10 23:04:19 thomas-MacBookAir6-2 python[492226]:   [tool] (\u273f\u25e0\u203f\u25e0) \ud83d\udd0e failure_injection_*.md\nApr 10 23:04:20 thomas-MacBookAir6-2 python[492226]: \u26a1 Interrupted during API call.\nApr 10 23:04:20 thomas-MacBookAir6-2 python[492226]:   [done] \u250a \ud83d\udd0e find      failure_injection_*.md  0.5s (1.0s)\nApr 10 23:04:23 thomas-MacBookAir6-2 python[492226]:   [tool] (\uff61\u25d5\u203f\u25d5\uff61) \ud83d\udd0e failure_injection_*.md\nApr 10 23:04:24 thomas-MacBookAir6-2 python[492226]:   [done] \u250a \ud83d\udd0e find      failure_injection_*.md  0.9s (1.0s)\nApr 10 23:04:28 thomas-MacBookAir6-2 python[492226]:   [tool] (\u2267\u25e1\u2266) \ud83d\udcd6 /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/reports/failure_injection_20260410_210009.json\nApr 10 23:04:30 thomas-MacBookAir6-2 python[492226]:   [done] \u250a \ud83d\udcd6 read      /home/thomas/Dropbox/Projects/Claude-trading-bot/ops/reports/failure_injection_20260410_210009.json  1.9s (2.0s)\n\u2713 User gateway service is running\n\u2713 Systemd linger is enabled (service survives logout)"
+    },
+    "bot": {
+      "running": true,
+      "pids": [
+        695950,
+        696746
+      ],
+      "uptime_seconds": 112
+    },
+    "dashboard": {
+      "listening": true,
+      "http_ok": true,
+      "healthy": true
+    },
+    "startup_grace": false,
+    "incident_logged": "/home/thomas/Dropbox/Projects/Claude-trading-bot/ops/INCIDENTS.md",
+    "exit_code": 2
+  },
+  "remediation_seconds": 235,
+  "gate_mttr_le_300s": true,
+  "notes": "controlled bot kill drill executed"
+}

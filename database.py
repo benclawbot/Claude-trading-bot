@@ -12,6 +12,7 @@ import sqlite3
 import json
 import threading
 import statistics
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
@@ -85,7 +86,7 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS journal_entries (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id        INTEGER NOT NULL REFERENCES trades(id),
+            trade_id        INTEGER NOT NULL UNIQUE REFERENCES trades(id),
             strategy_name   TEXT NOT NULL,
             entry_price     REAL,
             exit_price      REAL,
@@ -97,7 +98,7 @@ def init_db():
             setup_summary   TEXT,
             outcome_analysis TEXT,
             reflection      TEXT,
-            lessons         TEXT,
+            lessons         TEXT DEFAULT '[]',
             created_at      TEXT DEFAULT (datetime('now'))
         );
 
@@ -169,11 +170,142 @@ def init_db():
             triggered_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS trades_decision (
+            trade_id TEXT PRIMARY KEY,
+            ts_decision TEXT NOT NULL DEFAULT (datetime('now')),
+            symbol TEXT NOT NULL,
+            timeframe TEXT,
+            strategy_id TEXT,
+            regime_id TEXT,
+            side TEXT NOT NULL,
+            confidence_raw REAL,
+            confidence_calibrated REAL,
+            expected_horizon_min INTEGER,
+            expected_move_bps REAL,
+            risk_budget_bps REAL,
+            stop_loss_bps REAL,
+            take_profit_bps REAL,
+            feature_snapshot_json TEXT DEFAULT '{}',
+            model_version TEXT,
+            policy_version TEXT,
+            decision_reason_short TEXT,
+            paper_or_live TEXT DEFAULT 'live'
+        );
+
+        CREATE TABLE IF NOT EXISTS trades_execution (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id TEXT NOT NULL REFERENCES trades_decision(trade_id),
+            ts_order_sent TEXT DEFAULT (datetime('now')),
+            ts_first_fill TEXT,
+            ts_full_fill TEXT,
+            exchange TEXT,
+            order_type TEXT,
+            order_qty REAL,
+            avg_fill_price REAL,
+            mid_at_send REAL,
+            spread_bps_at_send REAL,
+            slippage_bps REAL,
+            fees_bps REAL,
+            latency_ms_signal_to_send INTEGER,
+            latency_ms_send_to_fill INTEGER,
+            execution_quality_score REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS trades_outcome (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id TEXT NOT NULL REFERENCES trades_decision(trade_id),
+            horizon_min INTEGER NOT NULL,
+            ts_horizon TEXT DEFAULT (datetime('now')),
+            pnl_bps_gross REAL,
+            pnl_bps_net REAL,
+            mae_bps REAL,
+            mfe_bps REAL,
+            stopped_out INTEGER DEFAULT 0,
+            tp_hit INTEGER DEFAULT 0,
+            early_exit INTEGER DEFAULT 0,
+            outcome_label TEXT,
+            quality_label TEXT,
+            UNIQUE(trade_id, horizon_min)
+        );
+
+        CREATE TABLE IF NOT EXISTS trade_review_labels (
+            review_id TEXT PRIMARY KEY,
+            trade_id TEXT NOT NULL REFERENCES trades_decision(trade_id),
+            ts_review TEXT DEFAULT (datetime('now')),
+            reviewer TEXT,
+            should_take_again INTEGER,
+            mistake_type TEXT,
+            confidence_error_bucket TEXT,
+            notes TEXT,
+            final_label TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS infra_incidents (
+            incident_id TEXT PRIMARY KEY,
+            ts_start TEXT DEFAULT (datetime('now')),
+            ts_end TEXT,
+            severity TEXT,
+            component TEXT,
+            incident_signature TEXT,
+            remediate_action_taken TEXT,
+            trade_ids_affected_json TEXT DEFAULT '[]',
+            impact_tag TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS regime_performance_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            regime_id TEXT NOT NULL,
+            strategy_id TEXT NOT NULL,
+            day TEXT NOT NULL,
+            trades INTEGER NOT NULL,
+            win_rate REAL,
+            net_pnl_bps REAL,
+            avg_mae REAL,
+            avg_mfe REAL,
+            calibration_error REAL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(regime_id, strategy_id, day)
+        );
+
+        CREATE TABLE IF NOT EXISTS signal_quality_index (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id TEXT NOT NULL,
+            regime_id TEXT NOT NULL,
+            week TEXT NOT NULL,
+            true_shift_precision REAL,
+            fakeout_rate REAL,
+            early_entry_score REAL,
+            execution_penalty_score REAL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(strategy_id, regime_id, week)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_experiment_runs_week_decision
             ON experiment_runs(week_id, decision);
 
         CREATE INDEX IF NOT EXISTS idx_risk_events_week_time
             ON risk_events(week_id, triggered_at);
+
+        CREATE INDEX IF NOT EXISTS idx_trades_decision_ts
+            ON trades_decision(ts_decision);
+
+        CREATE INDEX IF NOT EXISTS idx_trades_execution_trade_id
+            ON trades_execution(trade_id);
+
+        CREATE INDEX IF NOT EXISTS idx_trades_outcome_trade_horizon
+            ON trades_outcome(trade_id, horizon_min);
+
+        CREATE INDEX IF NOT EXISTS idx_trade_review_labels_trade_id
+            ON trade_review_labels(trade_id);
+
+        CREATE INDEX IF NOT EXISTS idx_infra_incidents_ts_start
+            ON infra_incidents(ts_start);
+
+        CREATE INDEX IF NOT EXISTS idx_regime_performance_daily_lookup
+            ON regime_performance_daily(day, strategy_id, regime_id);
+
+        CREATE INDEX IF NOT EXISTS idx_signal_quality_index_lookup
+            ON signal_quality_index(week, strategy_id, regime_id);
     """)
     conn.commit()
     
@@ -194,6 +326,54 @@ def init_db():
         )
     """)
     conn.commit()
+
+    # ── Migration: add UNIQUE on trade_id in journal_entries ──────────────────
+    # Also migrate existing lessons from pipe-delimited TEXT → JSON array
+    _migrate_journal_lessons(conn)
+
+
+def _migrate_journal_lessons(conn: sqlite3.Connection):
+    """
+    1) Add UNIQUE constraint on trade_id (idempotent — skips if already present).
+    2) Migrate existing lessons rows from pipe-delimited TEXT → JSON array list.
+    3) Delete duplicate journal rows so each trade_id is unique.
+    """
+    try:
+        # Step 1: enforce uniqueness by keeping the oldest row per trade_id
+        # and deleting newer duplicates (created by the replay bug)
+        conn.execute("""
+            DELETE FROM journal_entries
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM journal_entries
+                GROUP BY trade_id
+            )
+        """)
+        conn.commit()
+
+        # Step 2: add UNIQUE on trade_id if not already there
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_journal_trade_id ON journal_entries(trade_id)"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # already exists
+
+        # Step 3: migrate lessons from pipe-delimited text → JSON list
+        rows = conn.execute(
+            "SELECT id, lessons FROM journal_entries WHERE lessons IS NOT NULL AND lessons NOT LIKE '[%'"
+        ).fetchall()
+        for row in rows:
+            raw = row["lessons"]
+            parts = [p.strip() for p in raw.split(" | ") if p.strip()]
+            conn.execute(
+                "UPDATE journal_entries SET lessons=? WHERE id=?",
+                (json.dumps(parts, ensure_ascii=False), row["id"])
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
 
 def clear_old_data():
@@ -300,6 +480,24 @@ def get_active_strategies() -> List[Dict]:
     return result
 
 
+def get_all_strategies() -> List[Dict]:
+    """Return all strategies persisted in the DB."""
+    rows = get_conn().execute("SELECT * FROM strategies").fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["params"] = json.loads(d.get("params") or "{}")
+        result.append(d)
+    return result
+
+
+def set_strategy_active(name: str, is_active: bool):
+    """Activate/deactivate a strategy in the persisted strategy registry."""
+    conn = get_conn()
+    conn.execute("UPDATE strategies SET is_active=? WHERE name=?", (int(bool(is_active)), name))
+    conn.commit()
+
+
 def update_strategy_capital(name: str, capital: float):
     conn = get_conn()
     conn.execute("UPDATE strategies SET capital=? WHERE name=?", (capital, name))
@@ -378,6 +576,215 @@ def record_trade(strategy_name: str, symbol: str, side: str,
           exit_reason, json.dumps(entry_features or {}), 1 if is_backtest else 0))
     conn.commit()
     return cursor.lastrowid
+
+
+def record_trade_decision(symbol: str,
+                          timeframe: str,
+                          strategy_id: str,
+                          regime_id: str,
+                          side: str,
+                          confidence_raw: float,
+                          confidence_calibrated: float,
+                          expected_horizon_min: Optional[int] = None,
+                          expected_move_bps: Optional[float] = None,
+                          risk_budget_bps: Optional[float] = None,
+                          stop_loss_bps: Optional[float] = None,
+                          take_profit_bps: Optional[float] = None,
+                          feature_snapshot: Optional[Dict[str, Any]] = None,
+                          model_version: Optional[str] = None,
+                          policy_version: Optional[str] = None,
+                          decision_reason_short: str = "",
+                          paper_or_live: str = "live",
+                          trade_id: Optional[str] = None) -> str:
+    """Persist a decision packet and return its trade_id."""
+    conn = get_conn()
+    resolved_trade_id = trade_id or str(uuid4())
+    conn.execute("""
+        INSERT INTO trades_decision
+        (trade_id, ts_decision, symbol, timeframe, strategy_id, regime_id, side,
+         confidence_raw, confidence_calibrated, expected_horizon_min, expected_move_bps,
+         risk_budget_bps, stop_loss_bps, take_profit_bps, feature_snapshot_json,
+         model_version, policy_version, decision_reason_short, paper_or_live)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        resolved_trade_id,
+        utc_now_iso(),
+        symbol,
+        timeframe,
+        strategy_id,
+        regime_id,
+        side,
+        confidence_raw,
+        confidence_calibrated,
+        expected_horizon_min,
+        expected_move_bps,
+        risk_budget_bps,
+        stop_loss_bps,
+        take_profit_bps,
+        json.dumps(feature_snapshot or {}),
+        model_version,
+        policy_version,
+        decision_reason_short,
+        paper_or_live,
+    ))
+    conn.commit()
+    return resolved_trade_id
+
+
+def record_trade_execution(trade_id: str,
+                           exchange: str,
+                           order_type: str,
+                           order_qty: float,
+                           avg_fill_price: float,
+                           mid_at_send: Optional[float] = None,
+                           spread_bps_at_send: Optional[float] = None,
+                           slippage_bps: Optional[float] = None,
+                           fees_bps: Optional[float] = None,
+                           latency_ms_signal_to_send: Optional[int] = None,
+                           latency_ms_send_to_fill: Optional[int] = None,
+                           execution_quality_score: Optional[float] = None,
+                           ts_order_sent: Optional[str] = None,
+                           ts_first_fill: Optional[str] = None,
+                           ts_full_fill: Optional[str] = None) -> int:
+    """Persist an execution packet linked to a decision trade_id."""
+    conn = get_conn()
+    cursor = conn.execute("""
+        INSERT INTO trades_execution
+        (trade_id, ts_order_sent, ts_first_fill, ts_full_fill, exchange, order_type,
+         order_qty, avg_fill_price, mid_at_send, spread_bps_at_send, slippage_bps,
+         fees_bps, latency_ms_signal_to_send, latency_ms_send_to_fill, execution_quality_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        trade_id,
+        ts_order_sent or utc_now_iso(),
+        ts_first_fill,
+        ts_full_fill,
+        exchange,
+        order_type,
+        order_qty,
+        avg_fill_price,
+        mid_at_send,
+        spread_bps_at_send,
+        slippage_bps,
+        fees_bps,
+        latency_ms_signal_to_send,
+        latency_ms_send_to_fill,
+        execution_quality_score,
+    ))
+    conn.commit()
+    return cursor.lastrowid
+
+
+def record_trade_outcome(trade_id: str,
+                         horizon_min: int,
+                         pnl_bps_gross: Optional[float] = None,
+                         pnl_bps_net: Optional[float] = None,
+                         mae_bps: Optional[float] = None,
+                         mfe_bps: Optional[float] = None,
+                         stopped_out: bool = False,
+                         tp_hit: bool = False,
+                         early_exit: bool = False,
+                         outcome_label: Optional[str] = None,
+                         quality_label: Optional[str] = None,
+                         ts_horizon: Optional[str] = None) -> int:
+    """Upsert an outcome packet for a decision trade_id + horizon."""
+    conn = get_conn()
+    cursor = conn.execute("""
+        INSERT INTO trades_outcome
+        (trade_id, horizon_min, ts_horizon, pnl_bps_gross, pnl_bps_net, mae_bps, mfe_bps,
+         stopped_out, tp_hit, early_exit, outcome_label, quality_label)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(trade_id, horizon_min) DO UPDATE SET
+            ts_horizon=excluded.ts_horizon,
+            pnl_bps_gross=excluded.pnl_bps_gross,
+            pnl_bps_net=excluded.pnl_bps_net,
+            mae_bps=excluded.mae_bps,
+            mfe_bps=excluded.mfe_bps,
+            stopped_out=excluded.stopped_out,
+            tp_hit=excluded.tp_hit,
+            early_exit=excluded.early_exit,
+            outcome_label=excluded.outcome_label,
+            quality_label=excluded.quality_label
+    """, (
+        trade_id,
+        horizon_min,
+        ts_horizon or utc_now_iso(),
+        pnl_bps_gross,
+        pnl_bps_net,
+        mae_bps,
+        mfe_bps,
+        int(stopped_out),
+        int(tp_hit),
+        int(early_exit),
+        outcome_label,
+        quality_label,
+    ))
+    conn.commit()
+    return cursor.lastrowid
+
+
+def record_trade_review_label(trade_id: str,
+                              reviewer: str,
+                              should_take_again: Optional[bool],
+                              mistake_type: str,
+                              confidence_error_bucket: str,
+                              notes: str,
+                              final_label: str,
+                              review_id: Optional[str] = None,
+                              ts_review: Optional[str] = None) -> str:
+    """Persist a review/label packet for a decision trade_id."""
+    conn = get_conn()
+    resolved_review_id = review_id or str(uuid4())
+    conn.execute("""
+        INSERT INTO trade_review_labels
+        (review_id, trade_id, ts_review, reviewer, should_take_again, mistake_type,
+         confidence_error_bucket, notes, final_label)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        resolved_review_id,
+        trade_id,
+        ts_review or utc_now_iso(),
+        reviewer,
+        None if should_take_again is None else int(should_take_again),
+        mistake_type,
+        confidence_error_bucket,
+        notes,
+        final_label,
+    ))
+    conn.commit()
+    return resolved_review_id
+
+
+def record_infra_incident(severity: str,
+                          component: str,
+                          incident_signature: str,
+                          remediate_action_taken: str = "",
+                          trade_ids_affected: Optional[List[str]] = None,
+                          impact_tag: str = "none",
+                          incident_id: Optional[str] = None,
+                          ts_start: Optional[str] = None,
+                          ts_end: Optional[str] = None) -> str:
+    """Persist an infra incident packet optionally linked to one or more trade_ids."""
+    conn = get_conn()
+    resolved_incident_id = incident_id or str(uuid4())
+    conn.execute("""
+        INSERT INTO infra_incidents
+        (incident_id, ts_start, ts_end, severity, component, incident_signature,
+         remediate_action_taken, trade_ids_affected_json, impact_tag)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        resolved_incident_id,
+        ts_start or utc_now_iso(),
+        ts_end,
+        severity,
+        component,
+        incident_signature,
+        remediate_action_taken,
+        json.dumps(trade_ids_affected or []),
+        impact_tag,
+    ))
+    conn.commit()
+    return resolved_incident_id
 
 
 def get_trades(strategy_name: str = None, limit: int = 500, include_backtest: bool = False) -> List[Dict]:
@@ -464,17 +871,53 @@ def record_journal_entry(trade_id: int, strategy_name: str,
                          pnl: float, pnl_pct: float, side: str,
                          duration_hours: float, market_regime: str,
                          setup_summary: str, outcome_analysis: str,
-                         reflection: str, lessons: str):
+                         reflection: str, lessons: Any):
+    """
+    Idempotent: one journal entry per trade_id.
+    lessons: pass a list of lesson strings (will be JSON-serialized).
+             Pass an empty list to write no lessons.
+    """
     conn = get_conn()
+    # Normalise lessons to a JSON array string
+    if isinstance(lessons, list):
+        lessons_json = json.dumps(lessons, ensure_ascii=False)
+    elif isinstance(lessons, str):
+        # Back-compat: legacy pipe-delimited string → convert to list
+        try:
+            parsed = json.loads(lessons)
+            if isinstance(parsed, list):
+                lessons_json = lessons
+            else:
+                lessons_json = json.dumps([lessons])
+        except Exception:
+            # Treat as legacy pipe-delimited string
+            parts = [p.strip() for p in lessons.split(" | ") if p.strip()]
+            lessons_json = json.dumps(parts, ensure_ascii=False)
+    else:
+        lessons_json = "[]"
+
     conn.execute("""
         INSERT INTO journal_entries
         (trade_id, strategy_name, entry_price, exit_price, pnl, pnl_pct,
          side, duration_hours, market_regime, setup_summary, outcome_analysis,
          reflection, lessons)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(trade_id) DO UPDATE SET
+            entry_price    = excluded.entry_price,
+            exit_price     = excluded.exit_price,
+            pnl            = excluded.pnl,
+            pnl_pct        = excluded.pnl_pct,
+            side           = excluded.side,
+            duration_hours = excluded.duration_hours,
+            market_regime  = excluded.market_regime,
+            setup_summary  = excluded.setup_summary,
+            outcome_analysis = excluded.outcome_analysis,
+            reflection     = excluded.reflection,
+            lessons        = excluded.lessons,
+            created_at     = excluded.created_at
     """, (trade_id, strategy_name, entry_price, exit_price, pnl, pnl_pct,
           side, duration_hours, market_regime, setup_summary, outcome_analysis,
-          reflection, lessons))
+          reflection, lessons_json))
     conn.commit()
 
 
@@ -507,7 +950,31 @@ def get_journal_entries(strategy_name: str = None, limit: int = 100, include_bac
                 WHERE t.is_backtest=0
                 ORDER BY j.created_at DESC LIMIT ?
             """, (limit,)).fetchall()
-    return [dict(row) for row in rows]
+    # Parse lessons from JSON string to list (back-compat: legacy pipe-delimited)
+    result = []
+    for row in rows:
+        d = dict(row)
+        raw = d.get("lessons") or "[]"
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                d["lessons"] = parsed
+            else:
+                d["lessons"] = [str(parsed)]
+        except Exception:
+            parts = [p.strip() for p in raw.split(" | ") if p.strip()]
+            d["lessons"] = parts
+        result.append(d)
+    return result
+
+
+def journal_has_entry(trade_id: int) -> bool:
+    """Return True if a journal entry already exists for this trade_id."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM journal_entries WHERE trade_id=? LIMIT 1", (trade_id,)
+    ).fetchone()
+    return row is not None
 
 
 # ─── Balance helpers ──────────────────────────────────────────────────────────
@@ -835,3 +1302,89 @@ def upsert_experiment_run(payload: Dict[str, Any]):
         ),
     )
     conn.commit()
+
+
+def upsert_regime_performance_daily(regime_id: str,
+                                    strategy_id: str,
+                                    day: str,
+                                    trades: int,
+                                    win_rate: Optional[float],
+                                    net_pnl_bps: Optional[float],
+                                    avg_mae: Optional[float],
+                                    avg_mfe: Optional[float],
+                                    calibration_error: Optional[float]):
+    """Upsert daily regime-level performance aggregates."""
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO regime_performance_daily (
+            regime_id, strategy_id, day, trades,
+            win_rate, net_pnl_bps, avg_mae, avg_mfe, calibration_error, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(regime_id, strategy_id, day) DO UPDATE SET
+            trades=excluded.trades,
+            win_rate=excluded.win_rate,
+            net_pnl_bps=excluded.net_pnl_bps,
+            avg_mae=excluded.avg_mae,
+            avg_mfe=excluded.avg_mfe,
+            calibration_error=excluded.calibration_error,
+            updated_at=datetime('now')
+        """,
+        (regime_id, strategy_id, day, trades, win_rate, net_pnl_bps, avg_mae, avg_mfe, calibration_error),
+    )
+    conn.commit()
+
+
+def upsert_signal_quality_index(strategy_id: str,
+                                regime_id: str,
+                                week: str,
+                                true_shift_precision: Optional[float],
+                                fakeout_rate: Optional[float],
+                                early_entry_score: Optional[float],
+                                execution_penalty_score: Optional[float]):
+    """Upsert weekly signal quality index aggregates."""
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO signal_quality_index (
+            strategy_id, regime_id, week,
+            true_shift_precision, fakeout_rate, early_entry_score,
+            execution_penalty_score, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(strategy_id, regime_id, week) DO UPDATE SET
+            true_shift_precision=excluded.true_shift_precision,
+            fakeout_rate=excluded.fakeout_rate,
+            early_entry_score=excluded.early_entry_score,
+            execution_penalty_score=excluded.execution_penalty_score,
+            updated_at=datetime('now')
+        """,
+        (
+            strategy_id,
+            regime_id,
+            week,
+            true_shift_precision,
+            fakeout_rate,
+            early_entry_score,
+            execution_penalty_score,
+        ),
+    )
+    conn.commit()
+
+
+def get_latest_signal_quality_index(strategy_id: str, regime_id: str) -> Optional[Dict[str, Any]]:
+    """Return latest weekly SQI row for a strategy+regime."""
+    row = get_conn().execute(
+        """
+        SELECT * FROM signal_quality_index
+        WHERE strategy_id=? AND regime_id=?
+        ORDER BY week DESC
+        LIMIT 1
+        """,
+        (strategy_id, regime_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+
+
+

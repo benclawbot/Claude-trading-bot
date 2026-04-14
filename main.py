@@ -20,6 +20,7 @@ Changes:
   - Added log rotation to prevent unbounded log growth
 """
 
+import atexit
 import logging
 import logging.handlers
 import os
@@ -30,6 +31,11 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, List
 
+try:
+    import fcntl
+except Exception:  # pragma: no cover
+    fcntl = None
+
 import config
 import database as db
 import review_engine
@@ -38,6 +44,16 @@ from backtester import run_all_backtests
 from portfolio_manager import PortfolioManager
 from learning_engine import LearningEngine
 from strategies import ALL_STRATEGIES
+from utils.indicators import compute_market_regime
+
+# Optional: TradingView MCP for macro sentiment + extended market data
+try:
+    from tradingview_client import tv_prefetch, tv_client, is_available as tv_available
+    _TV_IMPORTED = True
+except Exception:
+    tv_prefetch = None
+    tv_client = None
+    _TV_IMPORTED = False
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 # Console handler with colors (if available)
@@ -80,10 +96,58 @@ logger = logging.getLogger("main")
 
 # ─── Shutdown flag ────────────────────────────────────────────────────────────
 _shutdown = threading.Event()
+_lock_handle = None
+
+
+def _release_singleton_lock():
+    global _lock_handle
+    if _lock_handle is None:
+        return
+    try:
+        if fcntl is not None:
+            fcntl.flock(_lock_handle.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        _lock_handle.close()
+    except Exception:
+        pass
+    _lock_handle = None
+
+
+def _acquire_singleton_lock() -> bool:
+    """Ensure only one bot process writes to the same DB/logs at a time."""
+    global _lock_handle
+    if fcntl is None:
+        logger.warning("fcntl unavailable; singleton lock disabled")
+        return True
+
+    lock_path = os.path.join(os.path.dirname(__file__), "trading_bot.lock")
+    _lock_handle = open(lock_path, "w")
+    try:
+        fcntl.flock(_lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_handle.write(str(os.getpid()))
+        _lock_handle.flush()
+        atexit.register(_release_singleton_lock)
+        return True
+    except BlockingIOError:
+        logger.critical("Another trading bot instance is already running (singleton lock held)")
+        try:
+            _lock_handle.close()
+        except Exception:
+            pass
+        _lock_handle = None
+        return False
+
 
 def _handle_signal(sig, frame):
     logger.warning(f"Signal {sig} received — shutting down gracefully…")
     _shutdown.set()
+    if _TV_IMPORTED and tv_prefetch is not None:
+        try:
+            tv_prefetch.stop()
+        except Exception:
+            pass
 
 signal.signal(signal.SIGINT,  _handle_signal)
 signal.signal(signal.SIGTERM, _handle_signal)
@@ -101,6 +165,43 @@ class TradingBot:
         self._strat_dfs: Dict[str, object] = {}
         self._current_price: float = 0.0
         self._price_lock = threading.Lock()
+        self._last_fresh_price_ts: float = 0.0
+        self._last_stale_warn_ts: float = 0.0
+
+    @staticmethod
+    def _strategy_family(strategy_name: str) -> str:
+        mapping = getattr(config, "REGIME_ROUTER_FAMILY_BY_STRATEGY", {})
+        if isinstance(mapping, dict):
+            return str(mapping.get(strategy_name, "adaptive")).strip().lower()
+        return "adaptive"
+
+    @staticmethod
+    def _regime_allows_strategy(strategy_name: str, regime: str) -> bool:
+        enabled = bool(getattr(config, "REGIME_ROUTER_ENABLED", True))
+        if not enabled:
+            return True
+        allowed_map = getattr(config, "REGIME_ROUTER_ALLOWED_FAMILIES", {})
+        if not isinstance(allowed_map, dict):
+            return True
+        allowed = allowed_map.get(str(regime).upper())
+        if allowed is None:
+            return True
+        family = TradingBot._strategy_family(strategy_name)
+        allowed_set = {str(x).strip().lower() for x in allowed if str(x).strip()}
+        return family in allowed_set
+
+    @staticmethod
+    def _robustness_score_from_backtest(result) -> float:
+        if not result:
+            return 0.0
+        consistency = (
+            0.35 * max(0.0, min(1.0, float(result.win_rate)))
+            + 0.30 * max(0.0, min(1.0, float(result.profit_factor) / 2.5))
+            + 0.35 * max(0.0, min(1.0, 1.0 - float(result.max_drawdown) / 0.35))
+        )
+        edge = max(0.0, min(1.0, (float(result.avg_trade_pnl) + 0.02) / 0.08))
+        growth = max(0.0, min(1.0, (float(result.cagr) + 0.10) / 0.80))
+        return float(max(0.0, min(1.0, 0.50 * consistency + 0.30 * edge + 0.20 * growth)))
 
     # ─── Startup ──────────────────────────────────────────────────────────────
 
@@ -115,6 +216,7 @@ class TradingBot:
 
         # Fetch live price
         self._current_price = self.client.get_current_price(config.SYMBOL)
+        self._last_fresh_price_ts = time.time()
         stats = self.client.get_24hr_stats(config.SYMBOL)
         change_pct = float(stats.get("priceChangePercent", 0))
         logger.info(
@@ -156,9 +258,10 @@ class TradingBot:
                 return {str(s).strip() for s in value if str(s).strip()}
             return set()
 
+        min_robustness = float(getattr(config, "AUTORESEARCH_MIN_ROBUSTNESS", 0.55))
         pass_names = {
             name for name, r in bt_results.items()
-            if r and r.passes_threshold
+            if r and r.passes_threshold and self._robustness_score_from_backtest(r) >= min_robustness
         }
 
         exp_mode_enabled = _as_bool(getattr(config, "EXPERIMENT_MODE_ENABLED", False), False)
@@ -184,13 +287,15 @@ class TradingBot:
         active_count = 0
         for strat in self.strategies:
             result = bt_results.get(strat.name)
-            passes = bool(result and result.passes_threshold)
+            robust_score = self._robustness_score_from_backtest(result)
+            passes = bool(result and result.passes_threshold and robust_score >= min_robustness)
             reason = "no backtest result"
             if result:
                 reason = (
                     f"CAGR={result.cagr*100:.1f}% "
                     f"WR={result.win_rate*100:.1f}% "
-                    f"PF={result.profit_factor:.2f}"
+                    f"PF={result.profit_factor:.2f} "
+                    f"ROB={robust_score:.2f}"
                 )
 
             is_experiment = exp_mode_enabled and (strat.name in exp_candidate_names)
@@ -273,6 +378,30 @@ class TradingBot:
 
         logger.info("Startup complete. Entering trading loops.\n")
 
+        # Start TradingView MCP pre-fetch engine (market snapshots + sentiment)
+        if _TV_IMPORTED and tv_prefetch is not None:
+            if getattr(config, "TV_MCP_ENABLED", False):
+                tv_prefetch.start()
+                tv_state = tv_client()
+                if tv_state.get("available"):
+                    snap = tv_state.get("market_snapshot") or {}
+                    sent = tv_state.get("btc_sentiment") or {}
+                    logger.info(
+                        "[tv] MCP active | BTC sentiment: %s (%.3f) | "
+                        "snapshot: SPX=%.0f VIX=%.1f",
+                        sent.get("label", "unknown"),
+                        sent.get("score") or 0.0,
+                        snap.get("sp500", {}).get("price") or 0,
+                        snap.get("vix", {}).get("price") or 0,
+                    )
+            else:
+                logger.info("[tv] MCP disabled via TV_MCP_ENABLED=false")
+        else:
+            logger.info(
+                "[tv] tradingview-mcp not installed. "
+                "Run: pip install tradingview-mcp-server"
+            )
+
     # ─── Main run ─────────────────────────────────────────────────────────────
 
     def run(self):
@@ -306,6 +435,10 @@ class TradingBot:
                 self._refresh_candles()
                 price = self._current_price
 
+                if self._entry_paused_for_stale_price():
+                    _shutdown.wait(timeout=min(config.STRATEGY_CHECK_INTERVAL_SEC, 5))
+                    continue
+
                 for strat in self.strategies:
                     if not strat.is_active:
                         continue
@@ -319,13 +452,21 @@ class TradingBot:
                         continue
 
                     ml_conf = self.learning.get_confidence(strat.name, df)
+                    regime = compute_market_regime(df)
+                    if not self._regime_allows_strategy(strat.name, regime):
+                        logger.debug(f"[{strat.name}] regime router blocked in {regime}")
+                        continue
+
                     signal = strat.generate_signal(df)
+                    meta = signal.metadata if isinstance(signal.metadata, dict) else {}
+                    signal.metadata = dict(meta)
+                    signal.metadata.setdefault("regime", regime)
 
                     if signal.is_actionable:
                         logger.info(
                             f"[{strat.name}] SIGNAL {signal.type.value} "
                             f"conf={signal.confidence:.2f} ml={ml_conf:.2f} "
-                            f"price=${price:,.2f}"
+                            f"regime={regime} price=${price:,.2f}"
                         )
                         placed = self.portfolio.process_signal(strat, signal, price, ml_confidence=ml_conf)
                         if placed:
@@ -344,6 +485,7 @@ class TradingBot:
         logger.info("[positions] Loop started")
         while not _shutdown.is_set():
             try:
+                self._update_price()
                 price = self._current_price
                 if price > 0 and self.portfolio:
                     self.portfolio.check_open_positions(price)
@@ -355,15 +497,23 @@ class TradingBot:
 
     def _learning_loop(self):
         logger.info("[learning] Loop started")
-        _last_trade_count = 0
+        self._last_trade_count = 0
         while not _shutdown.is_set():
             try:
                 all_trades = db.get_trades(limit=1000)
                 current_count = len(all_trades)
 
-                if current_count > _last_trade_count:
-                    new_trades = all_trades[:current_count - _last_trade_count]
+                if current_count > self._last_trade_count:
+                    # Only process genuinely NEW trades — skip any that already
+                    # have a journal entry (idempotency guard + restart replay)
+                    new_trades = all_trades[:current_count - self._last_trade_count]
                     for trade in new_trades:
+                        if db.journal_has_entry(trade["id"]):
+                            logger.debug(
+                                f"[learning] trade #{trade['id']} already has "
+                                f"journal entry — skipping"
+                            )
+                            continue
                         interval  = self._get_strat_interval(trade["strategy_name"])
                         df_latest = self._strat_dfs.get(interval)
                         self.learning.on_trade_closed(
@@ -379,7 +529,7 @@ class TradingBot:
                             entry_features=trade.get("entry_features", {}),
                             df=df_latest,
                         )
-                    _last_trade_count = current_count
+                    self._last_trade_count = current_count
 
                 strat_dict = {s.name: s for s in self.strategies}
                 self.learning.update_performance_snapshots(strat_dict)
@@ -434,12 +584,36 @@ class TradingBot:
 
     # ─── Helpers ─────────────────────────────────────────────────────────────
 
+    def _price_staleness_sec(self) -> float:
+        if self._last_fresh_price_ts <= 0:
+            return float("inf")
+        return max(0.0, time.time() - self._last_fresh_price_ts)
+
+    def _entry_paused_for_stale_price(self) -> bool:
+        staleness = self._price_staleness_sec()
+        stale_limit = float(getattr(config, "STALE_PRICE_ENTRY_PAUSE_SEC", 120))
+        if staleness <= stale_limit:
+            return False
+
+        now = time.time()
+        warn_interval = float(getattr(config, "STALE_PRICE_WARN_INTERVAL_SEC", 60))
+        if now - self._last_stale_warn_ts >= warn_interval:
+            logger.warning(
+                "[stale-price] Pausing NEW entries: last fresh price %.1fs ago (limit %.1fs). "
+                "Open positions still monitored.",
+                staleness,
+                stale_limit,
+            )
+            self._last_stale_warn_ts = now
+        return True
+
     def _update_price(self):
         try:
             price = self.client.get_current_price(config.SYMBOL)
             if price > 0:
                 with self._price_lock:
                     self._current_price = price
+                self._last_fresh_price_ts = time.time()
         except Exception as e:
             logger.warning(f"Price update failed: {e}")
 
@@ -467,6 +641,9 @@ class TradingBot:
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 def main():
+    if not _acquire_singleton_lock():
+        sys.exit(2)
+
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     if not os.path.exists(env_path):
         example = os.path.join(os.path.dirname(__file__), ".env.example")
@@ -499,3 +676,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

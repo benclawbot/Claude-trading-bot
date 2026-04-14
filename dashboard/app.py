@@ -1,12 +1,13 @@
 """
 Trading Bot Dashboard – Dash / Plotly
 ──────────────────────────────────────
-Five tabs:
-  1. Portfolio Overview  – equity curve, balance, unrealized P&L
-  2. Strategy Performance – per-strategy metrics and equity curves
-  3. Open Positions       – live table with unrealized P&L
-  4. Trade History        – filterable trade log
-  5. Trade Journal        – individual entries with reflections
+Six tabs:
+  1. Portfolio Overview      – equity curve, balance, unrealized P&L
+  2. Strategy Performance    – per-strategy metrics and equity curves
+  3. Open Positions          – live table with unrealized P&L
+  4. Trade History           – filterable trade log
+  5. Trade Journal           – individual entries with reflections
+  6. Learning & Experiments  – lesson bias + experiment review tracking
 
 Reads all data from the SQLite database; auto-refreshes every 15 s.
 Run standalone:  python dashboard/app.py
@@ -26,9 +27,25 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
+import numpy as np
 
 import config
 import database as db
+
+# Shared price client for dashboard callbacks.
+# Important: disable websocket here to avoid creating per-refresh websocket threads.
+_price_client = None
+
+
+def _get_live_price(symbol: str) -> float:
+    global _price_client
+    try:
+        if _price_client is None:
+            from binance_client import BinanceClient
+            _price_client = BinanceClient(use_websocket=False)
+        return _price_client.get_current_price(symbol)
+    except Exception:
+        return 0.0
 
 # ─── App bootstrap ────────────────────────────────────────────────────────────
 
@@ -94,6 +111,145 @@ def _dark_layout(title: str = "") -> dict:
     )
 
 
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _latest_detected_regime() -> str:
+    try:
+        row = db.get_conn().execute(
+            "SELECT regime_id FROM trades_decision ORDER BY ts_decision DESC LIMIT 1"
+        ).fetchone()
+        if row and row["regime_id"]:
+            return str(row["regime_id"]).upper()
+    except Exception:
+        pass
+    return "UNKNOWN"
+
+
+def _robustness_from_recent_metrics(strategy_name: str, days: int = 30) -> float:
+    try:
+        m = db.get_recent_trade_metrics(strategy_name=strategy_name, days=days)
+    except Exception:
+        return 0.0
+
+    wr = _safe_float(m.get("win_rate"), 0.0)
+    pf = _safe_float(m.get("profit_factor"), 0.0)
+    avg_r = _safe_float(m.get("avg_r"), 0.0)
+    max_daily_loss_pct = abs(_safe_float(m.get("max_daily_loss_pct"), 0.0))
+    daily_std = _safe_float(m.get("daily_pnl_std"), 0.0)
+
+    consistency = (
+        0.40 * max(0.0, min(1.0, wr))
+        + 0.30 * max(0.0, min(1.0, pf / 2.5))
+        + 0.30 * max(0.0, min(1.0, 1.0 - (max_daily_loss_pct / 0.06)))
+    )
+    stability = max(0.0, min(1.0, 1.0 - (daily_std / 0.06)))
+    edge = max(0.0, min(1.0, (avg_r + 0.015) / 0.05))
+    return max(0.0, min(1.0, 0.50 * consistency + 0.30 * stability + 0.20 * edge))
+
+
+def _correlation_penalties(active_names):
+    enabled = bool(getattr(config, "CORRELATION_GUARD_ENABLED", True))
+    if not enabled:
+        return {n: 1.0 for n in active_names}
+
+    lookback = max(5, int(getattr(config, "CORRELATION_LOOKBACK_TRADES", 60)))
+    min_points = max(3, int(getattr(config, "CORRELATION_MIN_POINTS", 8)))
+    threshold = max(0.0, min(1.0, _safe_float(getattr(config, "CORRELATION_THRESHOLD", 0.75), 0.75)))
+    penalty = max(0.05, min(1.0, _safe_float(getattr(config, "CORRELATION_SIZE_PENALTY", 0.50), 0.50)))
+
+    series = {}
+    for name in active_names:
+        try:
+            trades = db.get_trades(name, limit=lookback)
+        except Exception:
+            trades = []
+        vals = [
+            _safe_float(t.get("pnl_pct"), 0.0)
+            for t in trades
+            if isinstance(t, dict) and t.get("pnl_pct") is not None
+        ]
+        series[name] = vals
+
+    out = {}
+    for name in active_names:
+        base = series.get(name, [])
+        if len(base) < min_points:
+            out[name] = 1.0
+            continue
+
+        max_abs_corr = 0.0
+        for other in active_names:
+            if other == name:
+                continue
+            o = series.get(other, [])
+            n = min(len(base), len(o))
+            if n < min_points:
+                continue
+            a = np.array(base[-n:], dtype=float)
+            b = np.array(o[-n:], dtype=float)
+            if np.std(a) <= 1e-10 or np.std(b) <= 1e-10:
+                continue
+            corr = float(np.corrcoef(a, b)[0, 1])
+            if np.isfinite(corr):
+                max_abs_corr = max(max_abs_corr, abs(corr))
+
+        out[name] = penalty if max_abs_corr >= threshold else 1.0
+    return out
+
+
+def _render_execution_governance():
+    active = db.get_active_strategies()
+    names = [s.get("name") for s in active if s.get("name")]
+    alloc_mode = str(getattr(config, "CAPITAL_ALLOCATION_MODE", "equal")).lower()
+    target_share = (1.0 / len(names)) if names else 0.0
+
+    regime = _latest_detected_regime()
+    fam_map = getattr(config, "REGIME_ROUTER_FAMILY_BY_STRATEGY", {}) if bool(getattr(config, "REGIME_ROUTER_ENABLED", True)) else {}
+    allow_map = getattr(config, "REGIME_ROUTER_ALLOWED_FAMILIES", {}) if bool(getattr(config, "REGIME_ROUTER_ENABLED", True)) else {}
+    allowed_families = allow_map.get(regime, []) if isinstance(allow_map, dict) else []
+
+    penalties = _correlation_penalties(names)
+
+    rows = []
+    for name in names:
+        family = str(fam_map.get(name, "adaptive")) if isinstance(fam_map, dict) else "adaptive"
+        robust = _robustness_from_recent_metrics(name)
+        rows.append({
+            "Strategy": name,
+            "Family": family,
+            "Target Share": f"{target_share*100:.1f}%",
+            "Corr Multiplier": f"{penalties.get(name, 1.0):.2f}x",
+            "Robustness": f"{robust:.2f}",
+        })
+
+    table = dash_table.DataTable(
+        data=rows,
+        columns=[{"name": c, "id": c} for c in (rows[0].keys() if rows else ["Strategy", "Family", "Target Share", "Corr Multiplier", "Robustness"])],
+        style_table={"overflowX": "auto"},
+        style_header={"backgroundColor": COLORS["card"], "color": COLORS["blue"], "fontWeight": "bold", "border": f"1px solid {COLORS['border']}"},
+        style_cell={"backgroundColor": COLORS["bg"], "color": COLORS["text"], "border": f"1px solid {COLORS['border']}", "fontSize": "13px", "padding": "8px 10px"},
+        page_size=10,
+    )
+
+    return dbc.Card([
+        dbc.CardBody([
+            html.H5("Execution Governance", style={"color": COLORS["blue"], "marginBottom": "10px"}),
+            dbc.Row([
+                dbc.Col(_metric_card("Current Regime", regime, color="yellow" if regime != "UNKNOWN" else "subtext"), md=3),
+                dbc.Col(_metric_card("Allocation Mode", alloc_mode, color="purple"), md=3),
+                dbc.Col(_metric_card("Per-Strategy Target", f"{target_share*100:.1f}%" if names else "—", color="blue"), md=3),
+                dbc.Col(_metric_card("Allowed Families", ", ".join(allowed_families) if allowed_families else "n/a", color="text"), md=3),
+            ], className="g-2 mb-2"),
+            table,
+        ])
+    ], style={"backgroundColor": COLORS["card"], "border": f"1px solid {COLORS['border']}", "borderRadius": "8px", "marginTop": "10px"})
+
+
 # ─── Main layout ──────────────────────────────────────────────────────────────
 
 app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
@@ -120,15 +276,17 @@ app.layout = dbc.Container(fluid=True, style={"backgroundColor": COLORS["bg"],
 
     # ── Top KPI row ───────────────────────────────────────────────────────────
     dbc.Row(id="kpi-row", className="g-2 my-2 mx-2"),
+    html.Div(id="macro-row", className="mx-2"),
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
     dbc.Tabs(id="main-tabs", active_tab="tab-overview", style={"margin": "0 12px"},
              children=[
-        dbc.Tab(label="Portfolio Overview",    tab_id="tab-overview"),
-        dbc.Tab(label="Strategy Performance",  tab_id="tab-strategies"),
-        dbc.Tab(label="Open Positions",        tab_id="tab-positions"),
-        dbc.Tab(label="Trade History",         tab_id="tab-history"),
-        dbc.Tab(label="Trade Journal",         tab_id="tab-journal"),
+        dbc.Tab(label="Portfolio Overview",      tab_id="tab-overview"),
+        dbc.Tab(label="Strategy Performance",    tab_id="tab-strategies"),
+        dbc.Tab(label="Open Positions",          tab_id="tab-positions"),
+        dbc.Tab(label="Trade History",           tab_id="tab-history"),
+        dbc.Tab(label="Trade Journal",           tab_id="tab-journal"),
+        dbc.Tab(label="Learning & Experiments",  tab_id="tab-learning-exp"),
     ]),
 
     html.Div(id="tab-content", style={"padding": "12px 12px 30px"}),
@@ -161,9 +319,7 @@ def update_kpis(_):
     # Compute unrealized P&L LIVE from current open positions + latest price
     # (don't trust stale DB values that may be minutes old)
     try:
-        from binance_client import BinanceClient
-        client = BinanceClient()
-        current_price = client.get_current_price(config.SYMBOL)
+        current_price = _get_live_price(config.SYMBOL)
         unreal = 0.0
         for pos in db.get_open_positions():
             ep = float(pos["entry_price"])
@@ -216,6 +372,86 @@ def update_kpis(_):
 
 
 @app.callback(
+    Output("macro-row", "children"),
+    Input("interval-refresh", "n_intervals"),
+)
+def update_macro_row(_):
+    """Fetch and display macro market snapshot (SPX, VIX, EUR/USD, BTC sentiment)."""
+    try:
+        from tradingview_client import tv_client
+        tv = tv_client()
+    except Exception:
+        return []
+
+    if not tv.get("available"):
+        return []
+
+    snap = tv.get("market_snapshot") or {}
+    sent = tv.get("btc_sentiment") or {}
+
+    def _fmt(val, fmt="%s"):
+        return fmt % val if val is not None else "—"
+
+    def _pct(val):
+        if val is None:
+            return "—"
+        try:
+            return f"{float(val):+.2f}%"
+        except Exception:
+            return "—"
+
+    def _color_for_vix(vix_val):
+        try:
+            v = float(vix_val)
+            if v > 30:
+                return "red"
+            elif v > 20:
+                return "yellow"
+            return "green"
+        except Exception:
+            return "text"
+
+    def _sentiment_color(label):
+        if not label:
+            return "text"
+        l = label.lower()
+        if "bullish" in l or "strongly bullish" in l:
+            return "green"
+        if "bearish" in l or "strongly bearish" in l:
+            return "red"
+        return "yellow"
+
+    cards = [
+        dbc.Col(_metric_card(
+            "SPX 500",
+            _fmt(snap.get("sp500", {}).get("price"), "%.0f"),
+            color="text",
+            subtitle=_pct(snap.get("sp500", {}).get("change_pct")),
+        ), width="auto"),
+        dbc.Col(_metric_card(
+            "VIX",
+            _fmt(snap.get("vix", {}).get("price"), "%.1f"),
+            color=_color_for_vix(snap.get("vix", {}).get("price")),
+            subtitle="fear index",
+        ), width="auto"),
+        dbc.Col(_metric_card(
+            "BTC Sentiment",
+            _fmt(sent.get("label"), "%s"),
+            color=_sentiment_color(sent.get("label")),
+            subtitle=f"score {_fmt(sent.get('score'), '%.3f')}",
+        ), width="auto"),
+        dbc.Col(_metric_card(
+            "EUR/USD",
+            _fmt(snap.get("eurusd", {}).get("price"), "%.4f"),
+            color="text",
+            subtitle=_pct(snap.get("eurusd", {}).get("change_pct")),
+        ), width="auto"),
+    ]
+
+    return dbc.Row(cards, className="g-2 my-1 mx-0", style={"fontSize": "0.8rem"})
+
+
+@app.callback(
     Output("tab-content", "children"),
     Input("main-tabs", "active_tab"),
     Input("interval-refresh", "n_intervals"),
@@ -231,6 +467,8 @@ def render_tab(active_tab, _):
         return _render_history()
     elif active_tab == "tab-journal":
         return _render_journal()
+    elif active_tab == "tab-learning-exp":
+        return _render_learning_experiments()
     return html.Div("Select a tab")
 
 
@@ -250,7 +488,18 @@ def _render_overview():
         ))
         fig.add_hline(y=config.INITIAL_CAPITAL, line_dash="dot",
                       line_color=COLORS["subtext"], annotation_text="Initial Capital")
+
+        # Dynamic Y-axis range: adapt to observed min/max equity values.
+        y_min = float(df["total_balance"].min())
+        y_max = float(df["total_balance"].max())
+        span = y_max - y_min
+        if span <= 0:
+            # Flat line edge-case (single point or identical values)
+            pad = max(abs(y_max) * 0.01, 5.0)
+        else:
+            pad = max(span * 0.08, abs(y_max) * 0.005, 5.0)
         fig.update_layout(**_dark_layout("Portfolio Equity Curve"), height=320)
+        fig.update_yaxes(range=[y_min - pad, y_max + pad])
 
         # Drawdown
         eq = df["total_balance"].values
@@ -291,6 +540,9 @@ def _render_overview():
         dbc.Row([
             dbc.Col(dcc.Graph(figure=fig_dd, config={"displayModeBar": False}), width=12),
         ], className="g-2 mt-1"),
+        dbc.Row([
+            dbc.Col(_render_execution_governance(), width=12),
+        ], className="g-2 mt-1"),
     ])
 
 
@@ -303,12 +555,7 @@ def _render_strategies():
     charts = []
 
     # Get current price for unrealized P&L calculation
-    try:
-        from binance_client import BinanceClient
-        client = BinanceClient()
-        current_price = client.get_current_price(config.SYMBOL)
-    except Exception:
-        current_price = 0.0
+    current_price = _get_live_price(config.SYMBOL)
 
     for i, strat in enumerate(strategies):
         name  = strat["name"]
@@ -498,9 +745,15 @@ def _render_history():
         return html.Div("No closed trades yet.", style={"color": COLORS["subtext"], "padding": "20px"})
 
     rows = []
+    net_pnls = []
     for t in trades:
-        pnl     = float(t["pnl"])
-        pnl_pct = float(t["pnl_pct"]) * 100
+        gross_pnl = float(t["pnl"])
+        fees = float(t.get("fees_paid") or 0.0)
+        net_pnl = gross_pnl - fees
+        notional = max(float(t["entry_price"]) * float(t["quantity"]), 1e-9)
+        net_pct = (net_pnl / notional) * 100
+        net_pnls.append(net_pnl)
+
         rows.append({
             "Date": t.get("exit_time", "")[:16],
             "Strategy": t["strategy_name"],
@@ -508,30 +761,46 @@ def _render_history():
             "Entry $": f"{float(t['entry_price']):,.2f}",
             "Exit $": f"{float(t['exit_price']):,.2f}",
             "Qty": f"{float(t['quantity']):.5f}",
-            "P&L $": f"{pnl:+.2f}",
-            "P&L %": f"{pnl_pct:+.2f}%",
-            "Fees": f"${float(t['fees_paid']):.2f}",
+            "P&L $": f"{net_pnl:+.2f}",
+            "P&L %": f"{net_pct:+.2f}%",
+            "Fees": f"${fees:.2f}",
             "Duration": f"{float(t['duration_hours']):.1f}h",
             "Exit Reason": t.get("exit_reason", ""),
         })
 
-    # P&L distribution histogram
-    pnls = [float(t["pnl"]) for t in trades]
-    fig_hist = go.Figure(go.Histogram(
-        x=pnls, nbinsx=30,
-        marker_color=[COLORS["green"] if p >= 0 else COLORS["red"] for p in pnls],
-        opacity=0.8,
-    ))
+    # P&L distribution histogram (net after fees, split traces for explicit colors)
+    pnls = net_pnls
+    pos_pnls = [p for p in pnls if p >= 0]
+    neg_pnls = [p for p in pnls if p < 0]
+    fig_hist = go.Figure()
+    if pos_pnls:
+        fig_hist.add_trace(go.Histogram(
+            x=pos_pnls,
+            nbinsx=30,
+            name="Wins",
+            marker_color=COLORS["green"],
+            opacity=0.9,
+            hovertemplate="P&L: %{x:.2f}<br>Count: %{y}<extra>Wins</extra>",
+        ))
+    if neg_pnls:
+        fig_hist.add_trace(go.Histogram(
+            x=neg_pnls,
+            nbinsx=30,
+            name="Losses",
+            marker_color=COLORS["red"],
+            opacity=0.9,
+            hovertemplate="P&L: %{x:.2f}<br>Count: %{y}<extra>Losses</extra>",
+        ))
     fig_hist.update_layout(**_dark_layout("P&L Distribution"), height=200,
                            xaxis_title="P&L ($)", yaxis_title="Count",
-                           bargap=0.05)
+                           bargap=0.05, barmode="overlay", showlegend=True)
 
-    # Cumulative PnL chart
+    # Cumulative PnL chart (net after fees)
     cum_pnl = []
     running = 0
     dates   = []
     for t in reversed(trades):
-        running += float(t["pnl"])
+        running += float(t["pnl"]) - float(t.get("fees_paid") or 0.0)
         cum_pnl.append(running)
         dates.append(t.get("exit_time", ""))
     fig_cum = go.Figure(go.Scatter(
@@ -566,7 +835,8 @@ def _render_history():
             dbc.Col(dcc.Graph(figure=fig_hist, config={"displayModeBar": False}), width=5),
         ], className="g-2 mb-3"),
         html.H6(f"Trade History ({len(rows)} trades)",
-                style={"color": COLORS["blue"], "marginBottom": "8px"}),
+                style={"color": COLORS["blue"], "marginBottom": "4px"}),
+        html.Small("Color basis: Net P&L after fees", style={"color": COLORS["subtext"], "display": "block", "marginBottom": "8px"}),
         table,
     ])
 
@@ -619,8 +889,13 @@ def _render_journal():
                         html.P([html.Strong("Lessons: ")],
                                style={"fontSize": "13px", "color": COLORS["purple"],
                                       "marginBottom": "2px"}),
-                        html.P(e.get("lessons", ""),
-                               style={"fontSize": "12px", "color": COLORS["text"]}),
+                        html.Ul(
+                            [
+                                html.Li(lesson, style={"fontSize": "12px", "color": COLORS["text"]})
+                                for lesson in (e.get("lessons") or [])
+                            ],
+                            style={"paddingLeft": "18px", "margin": "0"},
+                        ),
                     ], md=3),
                 ]),
             ], style={"backgroundColor": COLORS["bg"], "padding": "12px 16px"}),
@@ -630,6 +905,203 @@ def _render_journal():
     return html.Div([
         html.H6("Trade Journal", style={"color": COLORS["blue"], "marginBottom": "16px"}),
         html.Div(cards),
+    ])
+
+
+def _compute_lesson_bias_snapshot():
+    """Rebuild lesson-bias snapshot from journal entries."""
+    try:
+        from strategies import ALL_STRATEGIES
+        from learning_engine import LearningEngine
+
+        strat_map = {S().name: S() for S in ALL_STRATEGIES}
+        le = LearningEngine(strat_map)
+        le.learn_from_all_journal_entries()
+        bias = le.get_lesson_bias_snapshot()
+        return bias or {}
+    except Exception:
+        return {}
+
+
+def _fetch_experiment_runs(limit: int = 80):
+    conn = db.get_conn()
+    rows = conn.execute(
+        """
+        SELECT experiment_id, week_id, baseline_version,
+               weekly_pnl_pct, weekly_drawdown_pct,
+               daily_pnl_std, trade_count,
+               score_total, decision, decision_reason, reviewed_at
+        FROM experiment_runs
+        ORDER BY reviewed_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _fetch_risk_events(limit: int = 80):
+    conn = db.get_conn()
+    rows = conn.execute(
+        """
+        SELECT week_id, trigger_level_pct, portfolio_dd_pct,
+               size_multiplier_applied, note, triggered_at
+        FROM risk_events
+        ORDER BY triggered_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _render_learning_experiments():
+    bias = _compute_lesson_bias_snapshot()
+
+    if bias:
+        sorted_bias = sorted(bias.items(), key=lambda kv: kv[1], reverse=True)
+        bias_rows = [
+            {
+                "Strategy": name,
+                "Lesson Bias Penalty": f"{pen:+.3f}",
+                "Effective Confidence Adj": f"{-pen:+.3f}",
+                "State": "Caution" if pen > 0 else ("Boost" if pen < 0 else "Neutral"),
+            }
+            for name, pen in sorted_bias
+        ]
+
+        fig_bias = go.Figure(go.Bar(
+            x=[r["Strategy"] for r in bias_rows],
+            y=[float(r["Lesson Bias Penalty"]) for r in bias_rows],
+            marker_color=[COLORS["red"] if float(r["Lesson Bias Penalty"]) > 0 else COLORS["green"]
+                          for r in bias_rows],
+        ))
+        fig_bias.update_layout(
+            **_dark_layout("Journal Lesson Bias by Strategy"),
+            height=260,
+            yaxis_title="Penalty applied to confidence",
+            xaxis_title="Strategy",
+        )
+
+        bias_table = dash_table.DataTable(
+            data=bias_rows,
+            columns=[{"name": c, "id": c} for c in bias_rows[0].keys()],
+            style_table={"overflowX": "auto"},
+            style_header={"backgroundColor": COLORS["card"], "color": COLORS["blue"],
+                          "fontWeight": "bold", "border": f"1px solid {COLORS['border']}"},
+            style_cell={"backgroundColor": COLORS["bg"], "color": COLORS["text"],
+                        "border": f"1px solid {COLORS['border']}", "fontSize": "12px",
+                        "padding": "6px 10px"},
+            style_data_conditional=[
+                {"if": {"filter_query": '{Lesson Bias Penalty} contains "+"'}, "color": COLORS["red"]},
+                {"if": {"filter_query": '{Lesson Bias Penalty} contains "-"'}, "color": COLORS["green"]},
+            ],
+        )
+    else:
+        fig_bias = _empty_fig("No lesson-bias data yet")
+        bias_table = html.Div("No journal learning data available yet.",
+                              style={"color": COLORS["subtext"], "padding": "8px"})
+
+    exp_runs = _fetch_experiment_runs(limit=120)
+    risk_events = _fetch_risk_events(limit=120)
+    size_mult = db.get_metadata("risk_size_multiplier") or "1.00"
+    size_week = db.get_metadata("risk_size_multiplier_week") or "-"
+
+    if exp_runs:
+        exp_rows = []
+        for r in exp_runs:
+            exp_rows.append({
+                "Reviewed": str(r.get("reviewed_at", ""))[:16],
+                "Week": r.get("week_id", ""),
+                "Experiment": r.get("experiment_id", ""),
+                "Trades": int(r.get("trade_count", 0) or 0),
+                "PnL %": f"{float(r.get('weekly_pnl_pct', 0.0))*100:+.2f}%",
+                "DD %": f"{float(r.get('weekly_drawdown_pct', 0.0)):+.2f}%",
+                "Score": f"{float(r.get('score_total', 0.0)):.1f}",
+                "Decision": r.get("decision", ""),
+                "Reason": r.get("decision_reason", ""),
+            })
+
+        exp_table = dash_table.DataTable(
+            data=exp_rows,
+            columns=[{"name": c, "id": c} for c in exp_rows[0].keys()],
+            page_size=12,
+            sort_action="native",
+            filter_action="native",
+            style_table={"overflowX": "auto"},
+            style_header={"backgroundColor": COLORS["card"], "color": COLORS["blue"],
+                          "fontWeight": "bold", "border": f"1px solid {COLORS['border']}"},
+            style_cell={"backgroundColor": COLORS["bg"], "color": COLORS["text"],
+                        "border": f"1px solid {COLORS['border']}", "fontSize": "12px",
+                        "padding": "6px 10px", "whiteSpace": "nowrap", "maxWidth": "360px", "overflow": "hidden", "textOverflow": "ellipsis"},
+            style_data_conditional=[
+                {"if": {"filter_query": '{Decision} = "PROMOTE"'}, "color": COLORS["green"], "fontWeight": "bold"},
+                {"if": {"filter_query": '{Decision} = "KEEP_TESTING"'}, "color": COLORS["blue"], "fontWeight": "bold"},
+                {"if": {"filter_query": '{Decision} = "DEMOTE"'}, "color": COLORS["yellow"], "fontWeight": "bold"},
+                {"if": {"filter_query": '{Decision} = "KILL"'}, "color": COLORS["red"], "fontWeight": "bold"},
+            ],
+            tooltip_data=[
+                {"Reason": {"value": row.get("Reason", ""), "type": "markdown"}}
+                for row in exp_rows
+            ],
+            tooltip_duration=None,
+        )
+    else:
+        exp_table = html.Div("No experiment review rows yet.", style={"color": COLORS["subtext"], "padding": "8px"})
+
+    if risk_events:
+        risk_rows = [
+            {
+                "Triggered": str(r.get("triggered_at", ""))[:16],
+                "Week": r.get("week_id", ""),
+                "Trigger %": f"{float(r.get('trigger_level_pct', 0.0)):+.2f}%",
+                "Portfolio DD %": f"{float(r.get('portfolio_dd_pct', 0.0)):+.2f}%",
+                "Size Multiplier": f"{float(r.get('size_multiplier_applied', 1.0)):.2f}x",
+                "Note": r.get("note", ""),
+            }
+            for r in risk_events
+        ]
+
+        risk_table = dash_table.DataTable(
+            data=risk_rows,
+            columns=[{"name": c, "id": c} for c in risk_rows[0].keys()],
+            page_size=8,
+            sort_action="native",
+            style_table={"overflowX": "auto"},
+            style_header={"backgroundColor": COLORS["card"], "color": COLORS["blue"],
+                          "fontWeight": "bold", "border": f"1px solid {COLORS['border']}"},
+            style_cell={"backgroundColor": COLORS["bg"], "color": COLORS["text"],
+                        "border": f"1px solid {COLORS['border']}", "fontSize": "12px",
+                        "padding": "6px 10px", "whiteSpace": "nowrap"},
+        )
+    else:
+        risk_table = html.Div("No risk ladder trigger events yet.", style={"color": COLORS["subtext"], "padding": "8px"})
+
+    return html.Div([
+        dbc.Row([
+            dbc.Col(_metric_card("Current Risk Size Multiplier", f"{size_mult}x", color="yellow",
+                                 subtitle=f"week {size_week}"), width=3),
+            dbc.Col(_metric_card("Strategies with Lesson Bias", f"{len(bias)}", color="purple",
+                                 subtitle="from journal history"), width=3),
+            dbc.Col(_metric_card("Experiment Reviews", str(len(exp_runs)), color="blue",
+                                 subtitle="rows tracked"), width=3),
+            dbc.Col(_metric_card("Risk Events", str(len(risk_events)), color="red",
+                                 subtitle="ladder triggers"), width=3),
+        ], className="g-2 mb-2"),
+
+        dbc.Row([
+            dbc.Col(dcc.Graph(figure=fig_bias, config={"displayModeBar": False}), width=6),
+            dbc.Col([
+                html.H6("Lesson Bias Table", style={"color": COLORS["blue"], "marginBottom": "8px"}),
+                bias_table,
+            ], width=6),
+        ], className="g-2"),
+
+        html.H6("Experiment Review Tracker", style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        exp_table,
+
+        html.H6("Risk Ladder Events", style={"color": COLORS["blue"], "margin": "16px 0 8px"}),
+        risk_table,
     ])
 
 
@@ -646,3 +1118,9 @@ def run_dashboard(debug: bool = False):
 
 if __name__ == "__main__":
     run_dashboard(debug=True)
+
+
+
+
+
+

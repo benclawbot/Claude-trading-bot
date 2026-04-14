@@ -359,32 +359,45 @@ class MLAdaptiveStrategy(BaseStrategy):
         for entry in journal_entries:
             regime = entry.get("market_regime", "UNKNOWN")
             won = entry.get("won", False)
-            lessons = entry.get("lessons", "")
+            raw_lessons = entry.get("lessons", [])
+            # Normalise to list (back-compat: may be a string from older data)
+            if isinstance(raw_lessons, list):
+                lesson_list = raw_lessons
+            elif isinstance(raw_lessons, str):
+                try:
+                    parsed = json.loads(raw_lessons)
+                    lesson_list = parsed if isinstance(parsed, list) else [parsed]
+                except Exception:
+                    lesson_list = [p.strip() for p in raw_lessons.split(" | ") if p.strip()]
+            else:
+                lesson_list = []
             strategy = entry.get("strategy_name", "")
-            
+
             if not won:
                 # Learn from failures
                 if regime not in self._regime_failure_patterns:
                     self._regime_failure_patterns[regime] = []
-                
-                # Extract failure patterns
-                failure_info = {
-                    "strategy": strategy,
-                    "exit_reason": entry.get("exit_reason", ""),
-                    "lesson": lessons,
-                }
-                self._regime_failure_patterns[regime].append(failure_info)
-                
+
+                # Extract failure patterns — store each lesson individually
+                for lesson_text in lesson_list:
+                    failure_info = {
+                        "strategy": strategy,
+                        "exit_reason": entry.get("exit_reason", ""),
+                        "lesson": lesson_text,
+                    }
+                    self._regime_failure_patterns[regime].append(failure_info)
+
                 # Keep only recent patterns (last 50 per regime)
                 if len(self._regime_failure_patterns[regime]) > 50:
                     self._regime_failure_patterns[regime] = self._regime_failure_patterns[regime][-50:]
-            
-            # Store insights
-            if lessons and lessons not in self._lesson_insights:
-                self._lesson_insights.append(lessons)
-                # Keep only recent insights (last 100)
-                if len(self._lesson_insights) > 100:
-                    self._lesson_insights = self._lesson_insights[-100:]
+
+            # Store individual lesson insights (deduplicated)
+            for lesson_text in lesson_list:
+                if lesson_text and lesson_text not in self._lesson_insights:
+                    self._lesson_insights.append(lesson_text)
+            # Keep only recent insights (last 100)
+            if len(self._lesson_insights) > 100:
+                self._lesson_insights = self._lesson_insights[-100:]
         
         # Save updated patterns
         self._save_model()
@@ -405,7 +418,7 @@ class MLAdaptiveStrategy(BaseStrategy):
         caution = min(1.0, failure_count / 20.0)  # Max out at 20 failures
         
         # Check recent performance
-        recent_failures = [f for f in failures[-10:] if f.get("exit_reason") == "STOP_LOST"]
+        recent_failures = [f for f in failures[-10:] if f.get("exit_reason") == "STOP_LOSS"]
         if len(recent_failures) >= 5:
             caution = min(1.0, caution + 0.3)
         
@@ -421,3 +434,5 @@ class MLAdaptiveStrategy(BaseStrategy):
     def insights_count(self) -> int:
         """Number of accumulated lesson insights."""
         return len(self._lesson_insights)
+
+

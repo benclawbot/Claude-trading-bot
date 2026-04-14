@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: no-root-tests
+        name: Disallow root-level test_*.py files
+        entry: python scripts/check_no_root_tests.py
+        language: system
+        pass_filenames: false

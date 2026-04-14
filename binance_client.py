@@ -43,6 +43,12 @@ try:
 except ImportError:
     BINANCE_SDK_AVAILABLE = False
 
+try:
+    import ccxt
+    CCXT_AVAILABLE = True
+except ImportError:
+    CCXT_AVAILABLE = False
+
 import config
 from utils.indicators import add_all_indicators
 
@@ -64,6 +70,44 @@ MIN_NOTIONAL = {
     "BNBUSDT": 10.0,
     "DEFAULT": 10.0,
 }
+
+
+def to_ccxt_symbol(symbol: str) -> str:
+    """Convert compact symbols like BTCUSDT to CCXT format BTC/USDT."""
+    if "/" in symbol:
+        return symbol.upper()
+
+    s = symbol.upper()
+    for quote in ("USDT", "USDC", "BUSD", "USD", "BTC", "ETH", "EUR"):
+        if s.endswith(quote) and len(s) > len(quote):
+            base = s[: -len(quote)]
+            return f"{base}/{quote}"
+    return s
+
+
+def sanitize_price_jump(symbol: str, new_price: float, price_cache: Dict[str, float],
+                        price_cache_ts: Dict[str, float]) -> float:
+    """Reject implausible single-tick jumps and keep recent cached price instead."""
+    if new_price <= 0:
+        return new_price
+
+    old_price = float(price_cache.get(symbol, 0.0) or 0.0)
+    if old_price <= 0:
+        return new_price
+
+    jump_limit = float(getattr(config, "PRICE_SANITY_MAX_JUMP_PCT", 0.08))
+    stale_limit = float(getattr(config, "PRICE_CACHE_MAX_STALE_SEC", 900))
+    age = time.time() - float(price_cache_ts.get(symbol, time.time()))
+    jump = abs(new_price - old_price) / old_price
+
+    if age <= stale_limit and jump > jump_limit:
+        logger.warning(
+            f"Price sanity guard for {symbol}: rejecting jump {jump*100:.2f}% "
+            f"(old={old_price:.2f}, new={new_price:.2f}, age={age:.1f}s)"
+        )
+        return old_price
+
+    return new_price
 
 
 class CircuitBreaker:
@@ -239,6 +283,7 @@ class BinancePublicDataFetcher:
             "User-Agent": "BTC-PaperTrading-Bot/2.0",
         })
         self._price_cache: Dict[str, float] = {}
+        self._price_cache_ts: Dict[str, float] = {}
         self._check_connectivity()
 
     def _check_connectivity(self):
@@ -299,17 +344,29 @@ class BinancePublicDataFetcher:
         return self._parse_klines(all_klines)
 
     def get_current_price(self, symbol: str) -> float:
-        """Real-time price from Binance ticker."""
+        """Real-time price with stale-cache fallback on transient API errors."""
+        max_stale_sec = float(getattr(config, "PRICE_CACHE_MAX_STALE_SEC", 900))
+        now_ts = time.time()
+
         try:
             data = self._get("/api/v3/ticker/price", params={"symbol": symbol})
             price = float(data["price"])
+            price = sanitize_price_jump(symbol, price, self._price_cache, self._price_cache_ts)
             self._price_cache[symbol] = price
+            self._price_cache_ts[symbol] = now_ts
             return price
         except Exception as e:
             logger.error(f"Price fetch failed for {symbol}: {e}")
             if symbol in self._price_cache:
-                logger.warning(f"Returning cached price: ${self._price_cache[symbol]:,.2f}")
-                return self._price_cache[symbol]
+                age = now_ts - float(self._price_cache_ts.get(symbol, now_ts))
+                if age <= max_stale_sec:
+                    logger.warning(
+                        f"Returning cached price (${self._price_cache[symbol]:,.2f}) age={age:.1f}s"
+                    )
+                    return self._price_cache[symbol]
+                logger.error(
+                    f"Cached price too old for {symbol}: age={age:.1f}s > max_stale={max_stale_sec:.1f}s"
+                )
             raise
 
     def get_order_book_spread(self, symbol: str) -> float:
@@ -351,6 +408,113 @@ class BinancePublicDataFetcher:
         return df
 
 
+class CCXTPublicDataFetcher:
+    """Multi-exchange public data fetcher powered by ccxt."""
+
+    def __init__(self, exchange_id: str = "binance"):
+        if not CCXT_AVAILABLE:
+            raise RuntimeError("ccxt is not installed")
+
+        self._exchange_id = exchange_id.lower()
+        exchange_cls = getattr(ccxt, self._exchange_id, None)
+        if exchange_cls is None:
+            raise ValueError(f"Unknown ccxt exchange id: {exchange_id}")
+
+        self._exchange = exchange_cls({"enableRateLimit": True})
+        self._price_cache: Dict[str, float] = {}
+        self._price_cache_ts: Dict[str, float] = {}
+
+        # lightweight connectivity + metadata
+        self._exchange.load_markets()
+        logger.info(f"✓ CCXT connected to exchange: {self._exchange_id}")
+
+    @staticmethod
+    def _parse_ohlcv(ohlcv: list) -> pd.DataFrame:
+        if not ohlcv:
+            return pd.DataFrame()
+        df = pd.DataFrame(ohlcv, columns=["open_time", "open", "high", "low", "close", "volume"])
+        for col in ("open", "high", "low", "close", "volume"):
+            df[col] = df[col].astype(float)
+        df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+        df = df.set_index("open_time")[["open", "high", "low", "close", "volume"]]
+        df = df.sort_index()
+        if len(df) > 1:
+            df = df.iloc[:-1]  # drop still-forming candle
+        df = add_all_indicators(df)
+        return df
+
+    def get_klines(self, symbol: str, interval: str, limit: int = 500) -> pd.DataFrame:
+        market = to_ccxt_symbol(symbol)
+        data = self._exchange.fetch_ohlcv(market, timeframe=interval, limit=min(limit, 1000))
+        return self._parse_ohlcv(data)
+
+    def get_klines_since(self, symbol: str, interval: str, days: int) -> pd.DataFrame:
+        market = to_ccxt_symbol(symbol)
+        since_ms = int((time.time() - days * 86400) * 1000)
+        end_ms = int(time.time() * 1000)
+        all_ohlcv = []
+
+        while since_ms < end_ms:
+            batch = self._exchange.fetch_ohlcv(market, timeframe=interval, since=since_ms, limit=1000)
+            if not batch:
+                break
+            all_ohlcv.extend(batch)
+            if len(batch) < 1000:
+                break
+            since_ms = int(batch[-1][0]) + 1
+            time.sleep(0.15)
+
+        logger.info(f"Fetched {len(all_ohlcv)} {interval} candles for {market} ({days}d history) via ccxt")
+        return self._parse_ohlcv(all_ohlcv)
+
+    def get_current_price(self, symbol: str) -> float:
+        max_stale_sec = float(getattr(config, "PRICE_CACHE_MAX_STALE_SEC", 900))
+        now_ts = time.time()
+        market = to_ccxt_symbol(symbol)
+
+        try:
+            ticker = self._exchange.fetch_ticker(market)
+            price = float(ticker.get("last") or ticker.get("close") or 0.0)
+            if price <= 0:
+                raise RuntimeError(f"No valid price in ccxt ticker for {market}")
+            price = sanitize_price_jump(symbol, price, self._price_cache, self._price_cache_ts)
+            self._price_cache[symbol] = price
+            self._price_cache_ts[symbol] = now_ts
+            return price
+        except Exception as e:
+            logger.error(f"CCXT price fetch failed for {market}: {e}")
+            if symbol in self._price_cache:
+                age = now_ts - float(self._price_cache_ts.get(symbol, now_ts))
+                if age <= max_stale_sec:
+                    logger.warning(
+                        f"Returning cached price (${self._price_cache[symbol]:,.2f}) age={age:.1f}s"
+                    )
+                    return self._price_cache[symbol]
+            raise
+
+    def get_order_book_spread(self, symbol: str) -> float:
+        market = to_ccxt_symbol(symbol)
+        try:
+            ob = self._exchange.fetch_order_book(market, limit=5)
+            best_bid = float(ob["bids"][0][0])
+            best_ask = float(ob["asks"][0][0])
+            mid = (best_bid + best_ask) / 2
+            return (best_ask - best_bid) / mid
+        except Exception:
+            return 0.0005
+
+    def get_24hr_stats(self, symbol: str) -> dict:
+        market = to_ccxt_symbol(symbol)
+        try:
+            t = self._exchange.fetch_ticker(market)
+            return {
+                "priceChangePercent": t.get("percentage", 0),
+                "volume": t.get("baseVolume", 0),
+            }
+        except Exception:
+            return {}
+
+
 class PaperTrader:
     """
     Simulates order execution at REAL Binance prices.
@@ -360,7 +524,7 @@ class PaperTrader:
     All paper trades are logged clearly as PAPER in logs and dashboard.
     """
 
-    def __init__(self, data_client: BinancePublicDataFetcher):
+    def __init__(self, data_client):
         self._data = data_client
         self._order_counter = 0
 
@@ -518,21 +682,31 @@ class BinanceClient:
     """
     Unified client for the trading bot.
 
-    Data   → ALWAYS real Binance public API (no keys needed)
+    Data   → Real market data via selected backend (Binance REST or ccxt)
     Orders → Paper trading by default (PaperTrader with real prices)
-           → Live Testnet/Mainnet if BINANCE_API_KEY is configured
+           → Live Binance Testnet/Mainnet if BINANCE_API_KEY is configured
     """
 
     def __init__(self, use_websocket: bool = True):
-        self._data = BinancePublicDataFetcher()
+        self._data_backend = getattr(config, "EXCHANGE_DATA_BACKEND", "binance").lower()
+        self._exchange_id = getattr(config, "EXCHANGE_ID", "binance").lower()
+
+        if self._data_backend == "ccxt":
+            if not CCXT_AVAILABLE:
+                raise RuntimeError("EXCHANGE_DATA_BACKEND=ccxt but ccxt is not installed")
+            self._data = CCXTPublicDataFetcher(exchange_id=self._exchange_id)
+        else:
+            self._data = BinancePublicDataFetcher()
+
         self._paper = PaperTrader(self._data)
         self._live_client = None
         self._live_mode = False
         self._setup_live_client()
-        
-        # Optional WebSocket for real-time prices
+
+        # Optional WebSocket for real-time prices (Binance backend only)
         self._ws_client = None
-        if use_websocket and WEBSOCKET_AVAILABLE:
+        ws_allowed = self._data_backend == "binance" and self._exchange_id == "binance"
+        if use_websocket and WEBSOCKET_AVAILABLE and ws_allowed:
             try:
                 ws_url = config.TESTNET_WS_URL if config.USE_TESTNET else "wss://stream.binance.com:9443/ws"
                 self._ws_client = BinanceWebSocketClient(["btcusdt"], ws_url=ws_url)
@@ -540,35 +714,42 @@ class BinanceClient:
                 logger.info("WebSocket enabled for real-time prices")
             except Exception as e:
                 logger.warning(f"WebSocket init failed: {e} - using REST polling")
+        elif use_websocket and not ws_allowed:
+            logger.info("WebSocket disabled: non-binance data backend selected")
 
         if self._live_mode:
             env = "TESTNET" if config.USE_TESTNET else "LIVE MAINNET ⚠️"
             logger.info(f"Execution mode: {env}")
         else:
-            logger.info("Execution mode: PAPER TRADING (real Binance market data)")
+            logger.info(f"Execution mode: PAPER TRADING (data backend={self._data_backend}:{self._exchange_id})")
 
     def _setup_live_client(self):
-        """Connect to Binance for live order execution if keys are provided."""
-        if not BINANCE_SDK_AVAILABLE:
-            return
+        """Connect to Binance via ccxt for live order execution if enabled."""
         if not config.BINANCE_API_KEY or not config.BINANCE_API_SECRET:
             return
         # Don't activate live trading unless explicitly set to PAPER_TRADING=false
         if getattr(config, "PAPER_TRADING", True):
             logger.info("PAPER_TRADING=true — skipping live execution setup")
             return
+        if not CCXT_AVAILABLE:
+            logger.warning("ccxt unavailable — cannot enable live execution")
+            return
+
         try:
-            self._live_client = Client(
-                api_key=config.BINANCE_API_KEY,
-                api_secret=config.BINANCE_API_SECRET,
-                testnet=config.USE_TESTNET,
-            )
+            self._live_client = ccxt.binance({
+                "apiKey": config.BINANCE_API_KEY,
+                "secret": config.BINANCE_API_SECRET,
+                "enableRateLimit": True,
+                "options": {"defaultType": "spot"},
+            })
             if config.USE_TESTNET:
-                self._live_client.API_URL = config.TESTNET_REST_URL
-            self._live_client.ping()
+                self._live_client.set_sandbox_mode(True)
+
+            # Lightweight credential/connectivity check
+            self._live_client.fetch_balance()
             self._live_mode = True
         except Exception as e:
-            logger.warning(f"Live client setup failed: {e} — using paper trading")
+            logger.warning(f"Live ccxt client setup failed: {e} — using paper trading")
 
     # ─── Market data (always real) ─────────────────────────────────────────────
 
@@ -583,22 +764,100 @@ class BinanceClient:
         return self._data.get_klines(symbol, interval, limit=limit)
 
     def get_current_price(self, symbol: str) -> float:
-        """Real-time market price."""
+        """Real-time market price with WS-first fallback to REST/cache."""
+        ws_price = self.get_websocket_price(symbol.lower())
+        if ws_price and ws_price > 0:
+            self._data._price_cache[symbol] = float(ws_price)
+            self._data._price_cache_ts[symbol] = time.time()
+            return float(ws_price)
         return self._data.get_current_price(symbol)
 
     def get_24hr_stats(self, symbol: str) -> dict:
         """24h ticker stats for dashboard."""
         return self._data.get_24hr_stats(symbol)
 
+    def _normalize_ccxt_order(self, order: Dict, symbol: str, side: str) -> Dict:
+        filled = float(order.get("filled") or 0.0)
+        cost = float(order.get("cost") or 0.0)
+        avg = float(order.get("average") or 0.0)
+        if cost <= 0 and avg > 0 and filled > 0:
+            cost = avg * filled
+        status_raw = str(order.get("status", "")).lower()
+        status = "FILLED" if status_raw in {"closed", "filled"} else str(order.get("status", "NEW")).upper()
+        fill_price = avg if avg > 0 else (cost / filled if filled > 0 else 0.0)
+
+        return {
+            "orderId": str(order.get("id") or order.get("clientOrderId") or ""),
+            "symbol": symbol,
+            "side": side.upper(),
+            "type": "MARKET",
+            "status": status,
+            "origQty": f"{float(order.get('amount') or filled or 0.0):.6f}",
+            "executedQty": f"{filled:.6f}",
+            "cummulativeQuoteQty": f"{cost:.4f}",
+            "fills": [{
+                "price": f"{fill_price:.4f}",
+                "qty": f"{filled:.6f}",
+                "commission": "0.000000",
+                "commissionAsset": "USDT",
+            }],
+            "transactTime": int(time.time() * 1000),
+        }
+
+    def _log_paper_live_parity(self, symbol: str, side: str, quantity: float, current_price: float) -> None:
+        """Log equivalent ccxt live payload while executing in paper mode."""
+        if not getattr(config, "PAPER_LIVE_PARITY_CHECK", True):
+            return
+        try:
+            payload = {
+                "exchange": self._exchange_id,
+                "symbol": to_ccxt_symbol(symbol),
+                "type": "market",
+                "side": side.lower(),
+                "amount": round(float(quantity), 8),
+                "paper_ref_price": round(float(current_price), 8),
+                "paper_notional": round(float(quantity) * float(current_price), 8),
+                "use_testnet": bool(getattr(config, "USE_TESTNET", False)),
+            }
+            logger.info("[paper-live-parity] %s", json.dumps(payload, sort_keys=True))
+        except Exception as e:
+            logger.warning(f"Parity payload log failed: {e}")
+
+    def _place_live_market_order(self, symbol: str, side: str, quantity: float) -> Optional[Dict]:
+        if not _circuit_breaker.can_proceed():
+            logger.error("Circuit breaker open - skipping live order")
+            return None
+
+        market = to_ccxt_symbol(symbol)
+        last_error = None
+        for attempt in range(ORDER_MAX_RETRIES):
+            try:
+                ccxt_side = side.lower()
+                order = self._live_client.create_order(market, "market", ccxt_side, quantity)
+                _circuit_breaker.record_success()
+                return self._normalize_ccxt_order(order, symbol, side)
+            except Exception as e:
+                last_error = e
+                _circuit_breaker.record_failure()
+                logger.warning(f"Live order attempt {attempt + 1}/{ORDER_MAX_RETRIES} failed: {e}")
+                if attempt < ORDER_MAX_RETRIES - 1:
+                    sleep_time = ORDER_RETRY_BACKOFF * (2 ** attempt)
+                    time.sleep(sleep_time)
+        logger.error(f"Live ccxt order failed after {ORDER_MAX_RETRIES} attempts: {last_error}")
+        return None
+
     def get_account_balance(self) -> Dict[str, float]:
         if self._live_mode and self._live_client:
             try:
-                account = self._live_client.get_account()
-                return {
-                    b["asset"]: float(b["free"])
-                    for b in account["balances"]
-                    if float(b["free"]) > 0 or b["asset"] in ("USDT", "BTC")
+                bal = self._live_client.fetch_balance()
+                free = bal.get("free", {}) if isinstance(bal, dict) else {}
+                result = {
+                    asset: float(amount)
+                    for asset, amount in free.items()
+                    if float(amount or 0) > 0 or asset in ("USDT", "BTC")
                 }
+                if result:
+                    return result
             except Exception as e:
                 logger.error(f"Balance fetch failed: {e}")
         return {"USDT": config.INITIAL_CAPITAL, "BTC": 0.0}
@@ -606,7 +865,7 @@ class BinanceClient:
     def get_open_orders(self, symbol: str) -> List[Dict]:
         if self._live_mode and self._live_client:
             try:
-                return self._live_client.get_open_orders(symbol=symbol)
+                return self._live_client.fetch_open_orders(to_ccxt_symbol(symbol))
             except Exception as e:
                 logger.error(f"Open orders fetch failed: {e}")
         return []
@@ -617,50 +876,142 @@ class BinanceClient:
                            quantity: float) -> Optional[Dict]:
         """Place a market order with validation and retry logic."""
         # Validate order first
-        current_price = self._data.get_current_price(symbol)
+        current_price = self.get_current_price(symbol)
         is_valid, error_msg, adjusted_qty = validate_order_quantity(symbol, quantity, current_price)
         if not is_valid:
             logger.error(f"Order validation failed: {error_msg}")
             return None
-        
+
         if adjusted_qty > 0 and adjusted_qty != quantity:
             logger.info(f"Adjusted quantity from {quantity:.6f} to {adjusted_qty:.6f}")
             quantity = adjusted_qty
-        
+
         if self._live_mode and self._live_client:
-            # Try live order with retry logic
-            result = place_market_order_with_retry(
-                self._live_client, symbol, side, quantity, current_price, use_live=True
-            )
+            result = self._place_live_market_order(symbol, side, quantity)
             if result is not None:
                 return result
             logger.warning("Live order failed, falling back to paper trading")
-        
+
+        self._log_paper_live_parity(symbol, side, quantity, current_price)
+
         # Paper trading fallback
         return self._paper.place_market_order(symbol, side, quantity)
+
+    @staticmethod
+    def _fmt_exchange_num(value: float) -> str:
+        return f"{float(value):.8f}"
+
+    def _place_live_oco_order(self, symbol: str, side: str, quantity: float,
+                              stop_price: float, limit_price: float,
+                              take_profit: float) -> Optional[Dict]:
+        """Best-effort live OCO placement for exchanges that expose OCO endpoints."""
+        if not self._live_mode or not self._live_client:
+            return None
+
+        if self._exchange_id != "binance":
+            logger.info(f"OCO exchange mode unsupported for {self._exchange_id}; using managed SL/TP")
+            return None
+
+        # Binance OCO expects compact symbols (BTCUSDT), not ccxt market format.
+        compact_symbol = symbol.replace("/", "").upper()
+        params = {
+            "symbol": compact_symbol,
+            "side": side.upper(),
+            "quantity": self._fmt_exchange_num(quantity),
+            # OCO upper (take-profit) leg
+            "price": self._fmt_exchange_num(take_profit),
+            # OCO lower (stop) leg
+            "stopPrice": self._fmt_exchange_num(stop_price),
+            "stopLimitPrice": self._fmt_exchange_num(limit_price),
+            "stopLimitTimeInForce": "GTC",
+        }
+
+        oco_methods = [
+            "private_post_order_oco",
+            "sapi_post_order_oco",
+            "sapiPostOrderOco",
+        ]
+
+        last_error = None
+        for method_name in oco_methods:
+            method = getattr(self._live_client, method_name, None)
+            if callable(method):
+                try:
+                    result = method(params)
+                    order_list_id = result.get("orderListId") if isinstance(result, dict) else None
+                    logger.info("Live OCO created via %s for %s qty=%s", method_name, compact_symbol, params["quantity"])
+                    return {
+                        "orderId": str(order_list_id or "OCO"),
+                        "status": "OPEN",
+                        "type": "OCO",
+                        "raw": result,
+                    }
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Live OCO attempt via {method_name} failed: {e}")
+
+        if last_error:
+            logger.warning(f"Live OCO unavailable, using managed SL/TP fallback: {last_error}")
+        return None
 
     def place_oco_order(self, symbol: str, side: str, quantity: float,
                         stop_price: float, limit_price: float,
                         take_profit: float) -> Optional[Dict]:
+        mode = getattr(config, "OCO_EXECUTION_MODE", "auto").lower()
+
+        if mode == "managed":
+            return {"orderId": "PAPER_SL_TP_INTERNAL", "status": "MANAGED", "mode": "managed_forced"}
+
         if self._live_mode and self._live_client:
-            try:
-                return self._live_client.create_oco_order(
-                    symbol=symbol, side=side,
-                    quantity=f"{quantity:.5f}",
-                    price=f"{take_profit:.2f}",
-                    stopPrice=f"{stop_price:.2f}",
-                    stopLimitPrice=f"{limit_price:.2f}",
-                    stopLimitTimeInForce="GTC",
-                )
-            except Exception as e:
-                logger.error(f"OCO order error: {e}")
-        # Paper: SL/TP is enforced internally by the position monitoring loop
-        return {"orderId": "PAPER_SL_TP_INTERNAL", "status": "MANAGED"}
+            live_oco = self._place_live_oco_order(symbol, side, quantity, stop_price, limit_price, take_profit)
+            if live_oco is not None:
+                return live_oco
+            if mode == "exchange":
+                logger.warning("OCO_EXECUTION_MODE=exchange requested but unavailable; using managed fallback")
+
+        # Paper / managed mode: SL/TP is enforced internally by the position monitoring loop
+        return {"orderId": "PAPER_SL_TP_INTERNAL", "status": "MANAGED", "mode": "managed_fallback"}
+
+    def cancel_oco_order(self, symbol: str, oco_order: Dict) -> bool:
+        """Cancel an exchange-side OCO order list; fallback to leg cancels when needed."""
+        if not (self._live_mode and self._live_client and isinstance(oco_order, dict)):
+            return False
+
+        compact_symbol = symbol.replace("/", "").upper()
+        order_list_id = str(oco_order.get("orderId") or "").strip()
+        raw = oco_order.get("raw") if isinstance(oco_order.get("raw"), dict) else {}
+        if not order_list_id:
+            order_list_id = str(raw.get("orderListId") or "").strip()
+
+        if self._exchange_id == "binance" and order_list_id:
+            params = {"symbol": compact_symbol, "orderListId": order_list_id}
+            for method_name in ("private_delete_order_list", "sapi_delete_order_list", "sapiDeleteOrderList"):
+                method = getattr(self._live_client, method_name, None)
+                if callable(method):
+                    try:
+                        method(params)
+                        logger.info("Cancelled OCO order-list %s via %s", order_list_id, method_name)
+                        return True
+                    except Exception as e:
+                        logger.warning(f"Failed cancelling OCO list via {method_name}: {e}")
+
+        # Fallback: try cancelling legs individually if present.
+        orders = raw.get("orders") if isinstance(raw, dict) else None
+        if isinstance(orders, list) and orders:
+            ok = True
+            for leg in orders:
+                leg_id = str((leg or {}).get("orderId") or "").strip()
+                if not leg_id:
+                    continue
+                ok = self.cancel_order(symbol, leg_id) and ok
+            return ok
+
+        return False
 
     def cancel_order(self, symbol: str, order_id: str) -> bool:
         if self._live_mode and self._live_client:
             try:
-                self._live_client.cancel_order(symbol=symbol, orderId=order_id)
+                self._live_client.cancel_order(order_id, to_ccxt_symbol(symbol))
                 return True
             except Exception as e:
                 logger.error(f"Cancel order error: {e}")

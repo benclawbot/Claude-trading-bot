@@ -349,3 +349,177 @@ class TestMLFeatures:
             conn = db_module.get_conn()
             count = conn.execute("SELECT COUNT(*) FROM ml_features").fetchone()[0]
             assert count == 1
+
+
+class TestTradeDataMoatPackets:
+    """Test v1 decision/execution/outcome/review/incident packet tables."""
+
+    def test_init_db_creates_data_moat_tables(self, temp_db):
+        import database as db_module
+
+        with patch.object(db_module, 'config') as mock_config:
+            mock_config.DB_PATH = temp_db
+            mock_config.UTC_NOW_SQL = "datetime('now')"
+            mock_config.UTC_NOW_ISO_SQL = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+
+            db_module.init_db()
+
+            conn = db_module.get_conn()
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+
+            assert "trades_decision" in tables
+            assert "trades_execution" in tables
+            assert "trades_outcome" in tables
+            assert "trade_review_labels" in tables
+            assert "infra_incidents" in tables
+
+    def test_record_packet_lifecycle(self, temp_db):
+        import database as db_module
+
+        with patch.object(db_module, 'config') as mock_config:
+            mock_config.DB_PATH = temp_db
+            mock_config.UTC_NOW_SQL = "datetime('now')"
+            mock_config.UTC_NOW_ISO_SQL = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+
+            db_module.init_db()
+
+            trade_id = db_module.record_trade_decision(
+                symbol="BTCUSDT",
+                timeframe="5m",
+                strategy_id="ML_Adaptive",
+                regime_id="trend_up",
+                side="long",
+                confidence_raw=0.62,
+                confidence_calibrated=0.68,
+                expected_horizon_min=60,
+                expected_move_bps=42.0,
+                risk_budget_bps=60.0,
+                stop_loss_bps=40.0,
+                take_profit_bps=80.0,
+                feature_snapshot={"rsi": 52.1, "atr": 0.012},
+                model_version="m1",
+                policy_version="p1",
+                decision_reason_short="breakout + regime alignment",
+                paper_or_live="live",
+            )
+
+            db_module.record_trade_execution(
+                trade_id=trade_id,
+                exchange="binance",
+                order_type="MARKET",
+                order_qty=0.01,
+                avg_fill_price=50010.0,
+                mid_at_send=50000.0,
+                spread_bps_at_send=0.5,
+                slippage_bps=2.0,
+                fees_bps=10.0,
+                latency_ms_signal_to_send=120,
+                latency_ms_send_to_fill=300,
+                execution_quality_score=88.0,
+            )
+
+            db_module.record_trade_outcome(
+                trade_id=trade_id,
+                horizon_min=60,
+                pnl_bps_gross=30.0,
+                pnl_bps_net=18.0,
+                mae_bps=12.0,
+                mfe_bps=44.0,
+                stopped_out=False,
+                tp_hit=True,
+                early_exit=False,
+                outcome_label="win",
+                quality_label="good_shift",
+            )
+
+            db_module.record_trade_review_label(
+                trade_id=trade_id,
+                reviewer="ai",
+                should_take_again=True,
+                mistake_type="none",
+                confidence_error_bucket="well_calibrated",
+                notes="Good alignment and execution",
+                final_label="tp",
+            )
+
+            db_module.record_infra_incident(
+                severity="warn",
+                component="gateway",
+                incident_signature="gateway:restart",
+                remediate_action_taken="restarted gateway",
+                trade_ids_affected=[trade_id],
+                impact_tag="none",
+            )
+
+            conn = db_module.get_conn()
+            assert conn.execute("SELECT COUNT(*) FROM trades_decision").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM trades_execution").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM trades_outcome").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM trade_review_labels").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM infra_incidents").fetchone()[0] == 1
+
+
+class TestDerivedSignalQualityTables:
+    """Test derived analytics tables used for moat compounding."""
+
+    def test_init_db_creates_derived_tables(self, temp_db):
+        import database as db_module
+
+        with patch.object(db_module, 'config') as mock_config:
+            mock_config.DB_PATH = temp_db
+            mock_config.UTC_NOW_SQL = "datetime('now')"
+            mock_config.UTC_NOW_ISO_SQL = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+
+            db_module.init_db()
+
+            conn = db_module.get_conn()
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+
+            assert "regime_performance_daily" in tables
+            assert "signal_quality_index" in tables
+
+    def test_upsert_and_read_derived_tables(self, temp_db):
+        import database as db_module
+
+        with patch.object(db_module, 'config') as mock_config:
+            mock_config.DB_PATH = temp_db
+            mock_config.UTC_NOW_SQL = "datetime('now')"
+            mock_config.UTC_NOW_ISO_SQL = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+
+            db_module.init_db()
+
+            db_module.upsert_regime_performance_daily(
+                regime_id="trend_up",
+                strategy_id="ML_Adaptive",
+                day="2026-04-10",
+                trades=12,
+                win_rate=0.58,
+                net_pnl_bps=84.0,
+                avg_mae=18.0,
+                avg_mfe=42.0,
+                calibration_error=0.07,
+            )
+
+            db_module.upsert_signal_quality_index(
+                strategy_id="ML_Adaptive",
+                regime_id="trend_up",
+                week="2026-W15",
+                true_shift_precision=0.67,
+                fakeout_rate=0.12,
+                early_entry_score=0.71,
+                execution_penalty_score=0.09,
+            )
+
+            latest = db_module.get_latest_signal_quality_index(strategy_id="ML_Adaptive", regime_id="trend_up")
+            assert latest is not None
+            assert latest["week"] == "2026-W15"
+            assert latest["true_shift_precision"] == pytest.approx(0.67)
+            assert latest["fakeout_rate"] == pytest.approx(0.12)

@@ -17,6 +17,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+import numpy as np
+
 import config
 import database as db
 from binance_client import BinanceClient
@@ -40,6 +42,10 @@ class PortfolioManager:
 
         self._allocate_capital()
 
+        # Warning suppression state to avoid log spam from persistent guard conditions.
+        # key -> last warning timestamp (epoch seconds)
+        self._warning_last_emit: Dict[str, float] = {}
+
     # ─── Capital allocation ───────────────────────────────────────────────────
 
     def _allocate_capital(self, current_price: float = 0.0):
@@ -53,7 +59,14 @@ class PortfolioManager:
 
         # Optional experiment-mode weighted allocation:
         # reserve a fixed capital pool for experiment strategies.
-        exp_enabled = self._as_bool(getattr(config, "EXPERIMENT_MODE_ENABLED", False), False)
+        # Default behavior is equal allocation across active strategies.
+        raw_alloc_mode = getattr(config, "CAPITAL_ALLOCATION_MODE", "equal")
+        alloc_mode = raw_alloc_mode.lower() if isinstance(raw_alloc_mode, str) else "equal"
+
+        exp_enabled = (
+            alloc_mode == "experiment_weighted"
+            and self._as_bool(getattr(config, "EXPERIMENT_MODE_ENABLED", False), False)
+        )
         exp_cap_pct = max(0.0, min(1.0, self._as_float(getattr(config, "EXPERIMENT_MODE_CAPITAL_PCT", 0.20), 0.20)))
 
         raw_exp_names = getattr(config, "EXPERIMENT_MODE_STRATEGIES", set())
@@ -152,15 +165,53 @@ class PortfolioManager:
                 logger.warning(f"{strat_name}: insufficient capital (${capital:.2f})")
                 return False
 
+            decision_ts = utc_now_iso()
+            side = "BUY" if signal.type == SignalType.BUY else "SELL"
+
             # ── Position sizing ───────────────────────────────────────────────
             quantity, notional = self._size_position(
-                capital, current_price, signal, ml_confidence
+                capital, current_price, signal, ml_confidence, strategy_name=strat_name
             )
             if quantity <= 0:
                 return False
 
+            raw_meta = signal.metadata if isinstance(signal.metadata, dict) else {}
+            decision_meta = dict(raw_meta)
+            default_stop = current_price * (
+                (1 - config.DEFAULT_STOP_LOSS_PCT) if side == "BUY"
+                else (1 + config.DEFAULT_STOP_LOSS_PCT)
+            )
+            default_tp = current_price * (
+                (1 + config.DEFAULT_TAKE_PROFIT_PCT) if side == "BUY"
+                else (1 - config.DEFAULT_TAKE_PROFIT_PCT)
+            )
+            planned_stop = float(signal.stop_loss or default_stop)
+            planned_tp = float(signal.take_profit or default_tp)
+            risk_budget_bps = abs((current_price - planned_stop) / current_price) * 10000 if current_price > 0 else None
+            stop_loss_bps = (abs((current_price - planned_stop) / current_price) * 10000) if current_price > 0 else None
+            take_profit_bps = (abs((planned_tp - current_price) / current_price) * 10000) if current_price > 0 else None
+
+            decision_trade_id = db.record_trade_decision(
+                symbol=config.SYMBOL,
+                timeframe=str(decision_meta.get("timeframe") or "unknown"),
+                strategy_id=strat_name,
+                regime_id=str(decision_meta.get("regime") or "unknown"),
+                side="long" if side == "BUY" else "short",
+                confidence_raw=float(signal.confidence),
+                confidence_calibrated=float(ml_confidence),
+                expected_horizon_min=self._to_int(decision_meta.get("expected_horizon_min")),
+                expected_move_bps=self._to_float(decision_meta.get("expected_move_bps")),
+                risk_budget_bps=risk_budget_bps,
+                stop_loss_bps=stop_loss_bps,
+                take_profit_bps=take_profit_bps,
+                feature_snapshot=decision_meta,
+                model_version=str(decision_meta.get("model_version") or "unknown"),
+                policy_version=str(decision_meta.get("policy_version") or "default"),
+                decision_reason_short=str(decision_meta.get("reason") or signal.type.value),
+                paper_or_live="live" if getattr(config, "LIVE_TRADING", True) else "paper",
+            )
+
             # ── Place order ───────────────────────────────────────────────────
-            side = "BUY" if signal.type == SignalType.BUY else "SELL"
             order = self.client.place_market_order(config.SYMBOL, side, quantity)
             if order is None:
                 logger.error(f"{strat_name}: order placement failed")
@@ -178,6 +229,50 @@ class PortfolioManager:
                 else (1 - config.DEFAULT_TAKE_PROFIT_PCT)
             )
 
+            slippage_bps = None
+            if current_price > 0:
+                slippage_bps = ((fill_price - current_price) / current_price) * 10000
+            decision_latency_ms = self._latency_ms(decision_ts, utc_now_iso())
+            exec_score = None
+            if slippage_bps is not None:
+                exec_score = max(0.0, 100.0 - min(abs(slippage_bps) * 8.0, 100.0))
+
+            db.record_trade_execution(
+                trade_id=decision_trade_id,
+                exchange="binance",
+                order_type="MARKET",
+                order_qty=quantity,
+                avg_fill_price=fill_price,
+                mid_at_send=current_price,
+                spread_bps_at_send=self._to_float(decision_meta.get("spread_bps")),
+                slippage_bps=slippage_bps,
+                fees_bps=float(getattr(config, "TRADING_FEE", 0.0)) * 10000,
+                latency_ms_signal_to_send=decision_latency_ms,
+                latency_ms_send_to_fill=None,
+                execution_quality_score=exec_score,
+                ts_order_sent=utc_now_iso(),
+                ts_first_fill=utc_now_iso(),
+                ts_full_fill=utc_now_iso(),
+            )
+
+            metadata = dict(decision_meta)
+            metadata["decision_trade_id"] = decision_trade_id
+
+            if not self.client.is_paper_trading and side == "BUY":
+                try:
+                    oco = self.client.place_oco_order(
+                        config.SYMBOL,
+                        "SELL",
+                        quantity,
+                        stop_price=float(sl),
+                        limit_price=float(sl),
+                        take_profit=float(tp),
+                    )
+                    if oco:
+                        metadata["oco_order"] = oco
+                except Exception as e:
+                    logger.warning(f"{strat_name}: failed to attach OCO protection: {e}")
+
             pos_id = db.open_position(
                 strategy_name=strat_name,
                 symbol=config.SYMBOL,
@@ -188,7 +283,7 @@ class PortfolioManager:
                 take_profit=tp,
                 order_id=str(order.get("orderId", "")),
                 ml_confidence=ml_confidence,
-                metadata=signal.metadata or {},
+                metadata=metadata,
             )
 
             # Deduct reserved capital (notional value)
@@ -246,11 +341,29 @@ class PortfolioManager:
         for pos in positions:
             self._close_position(pos, current_price, "SIGNAL_EXIT")
 
+    @staticmethod
+    def _extract_oco_order(meta: dict):
+        if not isinstance(meta, dict):
+            return None
+        oco = meta.get("oco_order")
+        return oco if isinstance(oco, dict) else None
+
     def _close_position(self, pos: dict, current_price: float, reason: str):
         strat_name = pos["strategy_name"]
         side  = pos["side"]
         qty   = float(pos["quantity"])
         entry = float(pos["entry_price"])
+
+        entry_features = pos.get("metadata", {})
+        # Reconciliation: on manual/signal exits, cancel any attached exchange OCO first.
+        if reason in {"SIGNAL_EXIT", "MANUAL"}:
+            oco_order = self._extract_oco_order(entry_features)
+            if oco_order:
+                try:
+                    cancelled = bool(self.client.cancel_oco_order(config.SYMBOL, oco_order))
+                    logger.info(f"[{strat_name}] OCO reconcile before {reason}: cancelled={cancelled}")
+                except Exception as e:
+                    logger.warning(f"[{strat_name}] OCO reconcile failed: {e}")
 
         # Place exit order
         exit_side = "SELL" if side == "LONG" else "BUY"
@@ -280,7 +393,6 @@ class PortfolioManager:
         except Exception:
             dur_hours = 0.0
 
-        entry_features = pos.get("metadata", {})
         trade_id = db.record_trade(
             strategy_name=strat_name,
             symbol=config.SYMBOL,
@@ -297,6 +409,27 @@ class PortfolioManager:
             exit_reason=reason,
             entry_features=entry_features,
         )
+
+        decision_trade_id = str(entry_features.get("decision_trade_id", "")).strip() if isinstance(entry_features, dict) else ""
+        if decision_trade_id:
+            pnl_bps_gross = (pnl_pct * 10000) if pnl_pct is not None else None
+            notional = entry * qty
+            pnl_bps_net = (net_pnl / notional) * 10000 if notional > 0 else None
+            outcome_label = "win" if net_pnl > 0 else ("loss" if net_pnl < 0 else "flat")
+            quality_label = "good_shift" if reason == "TAKE_PROFIT" else ("fakeout" if reason == "STOP_LOSS" else "noise")
+            db.record_trade_outcome(
+                trade_id=decision_trade_id,
+                horizon_min=max(1, int(round(dur_hours * 60))),
+                pnl_bps_gross=pnl_bps_gross,
+                pnl_bps_net=pnl_bps_net,
+                mae_bps=self._to_float(entry_features.get("mae_bps")),
+                mfe_bps=self._to_float(entry_features.get("mfe_bps")),
+                stopped_out=(reason == "STOP_LOSS"),
+                tp_hit=(reason == "TAKE_PROFIT"),
+                early_exit=(reason in {"SIGNAL_EXIT", "MANUAL"}),
+                outcome_label=outcome_label,
+                quality_label=quality_label,
+            )
 
         db.close_position(pos["id"])
 
@@ -342,8 +475,23 @@ class PortfolioManager:
         # Drawdown guard
         cap  = self._capital.get(strat_name, 0)
         peak = self._peak_capital.get(strat_name, cap)
-        if peak > 0 and (peak - cap) / peak > config.MAX_PORTFOLIO_DRAWDOWN_PCT:
-            logger.warning(f"{strat_name}: drawdown limit hit – pausing new entries")
+        drawdown_key = f"drawdown:{strat_name}"
+        drawdown = ((peak - cap) / peak) if peak > 0 else 0.0
+        if peak > 0 and drawdown > config.MAX_PORTFOLIO_DRAWDOWN_PCT:
+            self._warn_throttled(
+                drawdown_key,
+                (
+                    f"{strat_name}: drawdown limit hit ({drawdown:.2%} > "
+                    f"{config.MAX_PORTFOLIO_DRAWDOWN_PCT:.2%}) – pausing new entries"
+                ),
+                cooldown_seconds=1800,
+            )
+            return False
+        else:
+            self._clear_warning_throttle(drawdown_key)
+
+        # Regime router guard
+        if not self._regime_router_allows_entry(strat_name, signal):
             return False
 
         # Experiment lane allocation cap guard
@@ -378,6 +526,40 @@ class PortfolioManager:
         except Exception:
             return default
 
+    @staticmethod
+    def _to_float(value) -> Optional[float]:
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _to_int(value) -> Optional[int]:
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _latency_ms(start_iso: str, end_iso: str) -> Optional[int]:
+        try:
+            start_dt = datetime.fromisoformat(start_iso)
+            end_dt = datetime.fromisoformat(end_iso)
+            return max(0, int((end_dt - start_dt).total_seconds() * 1000))
+        except Exception:
+            return None
+
+    def _warn_throttled(self, key: str, message: str, cooldown_seconds: int = 1800) -> None:
+        """Emit a warning at most once per cooldown window for a given key."""
+        now_ts = utc_now().timestamp()
+        last_ts = self._warning_last_emit.get(key)
+        if last_ts is None or (now_ts - last_ts) >= cooldown_seconds:
+            logger.warning(message)
+            self._warning_last_emit[key] = now_ts
+
+    def _clear_warning_throttle(self, key: str) -> None:
+        self._warning_last_emit.pop(key, None)
+
     def _experiment_lane_allows_entry(self, strat_name: str) -> bool:
         enabled = self._as_bool(getattr(config, "EXPERIMENT_LANE_ENABLED", True), True)
         if not enabled:
@@ -399,7 +581,11 @@ class PortfolioManager:
 
         # If cap is explicitly zero, fully block experiment-lane entries.
         if cap_pct == 0.0:
-            logger.warning(f"{strat_name}: experiment lane cap is 0%, blocking new entries")
+            self._warn_throttled(
+                f"experiment_cap_zero:{strat_name}",
+                f"{strat_name}: experiment lane cap is 0%, blocking new entries",
+                cooldown_seconds=1800,
+            )
             return False
 
         total_alloc = 0.0
@@ -423,18 +609,108 @@ class PortfolioManager:
 
         lane_cap_abs = total_alloc * cap_pct
         if lane_alloc >= lane_cap_abs:
-            logger.warning(
-                f"{strat_name}: experiment lane allocation cap reached "
-                f"(${lane_alloc:,.2f}/${lane_cap_abs:,.2f}, {cap_pct:.0%})"
+            self._warn_throttled(
+                f"experiment_cap_reached:{strat_name}",
+                (
+                    f"{strat_name}: experiment lane allocation cap reached "
+                    f"(${lane_alloc:,.2f}/${lane_cap_abs:,.2f}, {cap_pct:.0%})"
+                ),
+                cooldown_seconds=1800,
             )
             return False
 
+        self._clear_warning_throttle(f"experiment_cap_zero:{strat_name}")
+        self._clear_warning_throttle(f"experiment_cap_reached:{strat_name}")
+
         return True
+
+    def _regime_router_allows_entry(self, strat_name: str, signal: Signal) -> bool:
+        enabled = self._as_bool(getattr(config, "REGIME_ROUTER_ENABLED", True), True)
+        if not enabled:
+            return True
+
+        metadata = signal.metadata if isinstance(signal.metadata, dict) else {}
+        regime = str(metadata.get("regime") or "").strip().upper()
+        if not regime:
+            return True
+
+        family_map = getattr(config, "REGIME_ROUTER_FAMILY_BY_STRATEGY", {})
+        allowed_map = getattr(config, "REGIME_ROUTER_ALLOWED_FAMILIES", {})
+
+        if not isinstance(family_map, dict) or not isinstance(allowed_map, dict):
+            return True
+
+        family = str(family_map.get(strat_name, "adaptive")).strip().lower()
+        allowed = allowed_map.get(regime)
+        if allowed is None:
+            return True
+
+        allowed_set = {str(x).strip().lower() for x in allowed if str(x).strip()}
+        if family not in allowed_set:
+            self._warn_throttled(
+                f"regime_router:{strat_name}:{regime}",
+                f"{strat_name}: blocked by regime router (regime={regime}, family={family})",
+                cooldown_seconds=900,
+            )
+            return False
+
+        self._clear_warning_throttle(f"regime_router:{strat_name}:{regime}")
+        return True
+
+    def _correlation_position_multiplier(self, strategy_name: str) -> float:
+        enabled = self._as_bool(getattr(config, "CORRELATION_GUARD_ENABLED", True), True)
+        if not enabled:
+            return 1.0
+
+        lookback = max(5, self._to_int(getattr(config, "CORRELATION_LOOKBACK_TRADES", 60)) or 60)
+        min_points = max(3, self._to_int(getattr(config, "CORRELATION_MIN_POINTS", 8)) or 8)
+        threshold = max(0.0, min(1.0, self._as_float(getattr(config, "CORRELATION_THRESHOLD", 0.75), 0.75)))
+        penalty = max(0.05, min(1.0, self._as_float(getattr(config, "CORRELATION_SIZE_PENALTY", 0.50), 0.50)))
+
+        try:
+            base = db.get_trades(strategy_name, limit=lookback)
+        except Exception:
+            return 1.0
+        if not isinstance(base, list):
+            return 1.0
+        base_series = [float(t.get("pnl_pct", 0.0) or 0.0) for t in base if isinstance(t, dict) and t.get("pnl_pct") is not None]
+        if len(base_series) < min_points:
+            return 1.0
+
+        max_abs_corr = 0.0
+        for other_name, other in self.strategies.items():
+            if other_name == strategy_name or not other.is_active:
+                continue
+
+            try:
+                other_trades = db.get_trades(other_name, limit=lookback)
+            except Exception:
+                continue
+            if not isinstance(other_trades, list):
+                continue
+            other_series = [float(t.get("pnl_pct", 0.0) or 0.0) for t in other_trades if isinstance(t, dict) and t.get("pnl_pct") is not None]
+            n = min(len(base_series), len(other_series))
+            if n < min_points:
+                continue
+
+            a = np.array(base_series[-n:], dtype=float)
+            b = np.array(other_series[-n:], dtype=float)
+            if np.std(a) <= 1e-10 or np.std(b) <= 1e-10:
+                continue
+
+            corr = float(np.corrcoef(a, b)[0, 1])
+            if np.isfinite(corr):
+                max_abs_corr = max(max_abs_corr, abs(corr))
+
+        if max_abs_corr >= threshold:
+            return float(penalty)
+        return 1.0
 
     # ─── Position sizing ──────────────────────────────────────────────────────
 
     def _size_position(self, capital: float, price: float,
-                       signal: Signal, ml_confidence: float
+                       signal: Signal, ml_confidence: float,
+                       strategy_name: str = ""
                        ) -> tuple:
         """
         Kelly-adjusted position sizing.
@@ -453,12 +729,23 @@ class PortfolioManager:
         except Exception:
             risk_multiplier = 1.0
 
-        notional = capital * base_pct * conf_scale * ml_scale * risk_multiplier
-        notional = min(notional, capital * config.MAX_POSITION_PCT * risk_multiplier)
+        lane_multiplier = self._lane_position_multiplier(strategy_name)
+        corr_multiplier = self._correlation_position_multiplier(strategy_name)
+
+        notional = capital * base_pct * conf_scale * ml_scale * risk_multiplier * lane_multiplier * corr_multiplier
+        notional = min(notional, capital * config.MAX_POSITION_PCT * risk_multiplier * lane_multiplier * corr_multiplier)
         notional = max(notional, 10.0)     # at least $10
 
         quantity = notional / price
         return round(quantity, 5), notional
+
+    @staticmethod
+    def _lane_position_multiplier(strategy_name: str) -> float:
+        """Return per-lane position size multiplier for this strategy."""
+        lane = {s.strip() for s in getattr(config, "EXPERIMENT_LANE_STRATEGIES", set()) if s and s.strip()}
+        if getattr(config, "EXPERIMENT_LANE_ENABLED", False) and strategy_name in lane:
+            return float(getattr(config, "EXPERIMENT_LANE_POSITION_MULTIPLIER", 0.75))
+        return float(getattr(config, "CORE_LANE_POSITION_MULTIPLIER", 1.0))
 
     # ─── Account state ────────────────────────────────────────────────────────
 
@@ -551,3 +838,12 @@ class PortfolioManager:
             )
         except Exception:
             pass  # non-blocking — don't disrupt trading
+
+
+
+
+
+
+
+
+

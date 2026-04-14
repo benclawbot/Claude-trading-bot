@@ -76,6 +76,11 @@ class LearningEngine:
         # Cross-strategy regime tracking
         self._regime_history: List[str] = []
 
+        # Generic journal-lesson memory (applies to ALL active strategies,
+        # not only ML_Adaptive)
+        self._journal_by_strategy: Dict[str, List[dict]] = {}
+        self._lesson_bias: Dict[str, float] = {}
+
     # ─── Called after every closed trade ──────────────────────────────────────
 
     def on_trade_closed(self, trade_id: int, strategy_name: str,
@@ -162,36 +167,118 @@ class LearningEngine:
         except Exception as e:
             logger.error(f"Failed to write journal entry: {e}")
 
+    def _normalize_journal_entry(self, entry: dict) -> dict:
+        """Normalize journal entry shape for downstream learning."""
+        pnl = float(entry.get("pnl", 0.0) or 0.0)
+        won = bool(entry.get("won")) if "won" in entry else (pnl > 0)
+        out = dict(entry)
+        out["won"] = won
+        out["pnl"] = pnl
+        out["strategy_name"] = out.get("strategy_name", "")
+        out["market_regime"] = out.get("market_regime", "UNKNOWN")
+        out["exit_reason"] = out.get("exit_reason", "")
+        raw_lessons = out.get("lessons", [])
+        if isinstance(raw_lessons, list):
+            out["lessons"] = raw_lessons
+        elif isinstance(raw_lessons, str):
+            try:
+                parsed = json.loads(raw_lessons)
+                out["lessons"] = parsed if isinstance(parsed, list) else []
+            except Exception:
+                out["lessons"] = [p.strip() for p in raw_lessons.split(" | ") if p.strip()]
+        else:
+            out["lessons"] = []
+        return out
+
+    def _recompute_lesson_bias(self, strategy_name: str):
+        """
+        Compute lesson-derived confidence bias for a strategy.
+        Positive values increase caution (lower confidence).
+        """
+        history = self._journal_by_strategy.get(strategy_name, [])
+        if not history:
+            self._lesson_bias[strategy_name] = 0.0
+            return
+
+        recent = history[-20:]
+        losses = sum(1 for e in recent if not e.get("won", False))
+        loss_rate = losses / len(recent)
+
+        # Baseline penalty from observed loss rate over recent journal entries.
+        penalty = max(0.0, loss_rate - 0.50) * 0.30  # up to +0.15
+
+        # Extra caution if there is a recent STOP_LOSS cluster.
+        stop_losses = sum(
+            1 for e in recent[-5:]
+            if str(e.get("exit_reason", "")).upper() == "STOP_LOSS"
+        )
+        if stop_losses >= 3:
+            penalty += 0.05
+
+        # Small boost when recent outcomes are consistently positive.
+        recent10 = recent[-10:]
+        if recent10:
+            wins10 = sum(1 for e in recent10 if e.get("won", False))
+            if wins10 / len(recent10) >= 0.70:
+                penalty -= 0.05
+
+        self._lesson_bias[strategy_name] = max(-0.10, min(0.25, penalty))
+
+    def _ingest_journal_entry_for_all_strategies(self, journal_entry: dict):
+        """Apply journal-learning effects that should impact all strategies."""
+        e = self._normalize_journal_entry(journal_entry)
+        name = e.get("strategy_name", "")
+        if not name:
+            return
+
+        bucket = self._journal_by_strategy.setdefault(name, [])
+        bucket.append(e)
+        if len(bucket) > 500:
+            del bucket[:-500]
+
+        self._recompute_lesson_bias(name)
+
     def _learn_from_new_journal_entry(self, journal_entry: dict):
         """
-        Process a new journal entry and update the ML strategy's learned patterns.
-        This creates a closed-loop feedback system.
+        Process a new journal entry:
+        1) Update generic lesson bias for all strategies.
+        2) Feed ML_Adaptive pattern learner (when enabled).
         """
+        self._ingest_journal_entry_for_all_strategies(journal_entry)
+
         ml_strat = self.strategies.get("ML_Adaptive")
         if not ml_strat or not hasattr(ml_strat, "learn_from_lessons"):
             return
-        
+
         try:
-            # Pass the single entry as a list
-            ml_strat.learn_from_lessons([journal_entry])
+            ml_strat.learn_from_lessons([self._normalize_journal_entry(journal_entry)])
         except Exception as e:
             logger.warning(f"Failed to learn from journal entry: {e}")
 
     def learn_from_all_journal_entries(self):
         """
-        Fetch all journal entries and update the ML strategy.
-        Should be called on startup to restore learned patterns.
+        Fetch recent journal entries and restore lesson effects on startup.
+        Applies to all strategies; ML_Adaptive gets extra pattern learning when present.
         """
-        ml_strat = self.strategies.get("ML_Adaptive")
-        if not ml_strat or not hasattr(ml_strat, "learn_from_lessons"):
-            return
-        
         try:
-            # Fetch recent journal entries
-            entries = db.get_journal_entries(limit=500)
-            if entries:
-                ml_strat.learn_from_lessons(entries)
-                logger.info(f"Loaded {len(entries)} journal entries for learning")
+            # Include archived/backtest-marked trades so historical lessons persist after trade-history resets.
+            entries = db.get_journal_entries(limit=500, include_backtest=True)
+            if not entries:
+                return
+
+            normalized = [self._normalize_journal_entry(e) for e in entries]
+            # Preserve chronological order for streak/bias reconstruction.
+            for e in reversed(normalized):
+                self._ingest_journal_entry_for_all_strategies(e)
+
+            ml_strat = self.strategies.get("ML_Adaptive")
+            if ml_strat and hasattr(ml_strat, "learn_from_lessons"):
+                ml_strat.learn_from_lessons(normalized)
+
+            logger.info(
+                f"Loaded {len(entries)} journal entries for learning "
+                f"across {len(self._journal_by_strategy)} strategies"
+            )
         except Exception as e:
             logger.warning(f"Failed to load journal entries: {e}")
 
@@ -321,9 +408,10 @@ class LearningEngine:
             except Exception:
                 pass
 
-        # Apply streak penalty
-        penalty = self._confidence_adjustments.get(strategy_name, 0.0)
-        return max(0.0, min(1.0, base_win_rate - penalty))
+        # Apply streak penalty + journal-lesson penalty (for all strategies)
+        streak_penalty = self._confidence_adjustments.get(strategy_name, 0.0)
+        lesson_penalty = self._lesson_bias.get(strategy_name, 0.0)
+        return max(0.0, min(1.0, base_win_rate - streak_penalty - lesson_penalty))
 
     # ─── Journal entry builder ─────────────────────────────────────────────────
 
@@ -490,9 +578,10 @@ Be specific and data-driven. No generic platitudes. Speak as if reviewing your o
         return result_str
 
     def _derive_lessons(self, strategy_name: str, won: bool, regime: str,
-                        exit_reason: str, feature_vec: list) -> str:
+                        exit_reason: str, feature_vec: list) -> List[str]:
         """
         Derive specific, actionable lessons from THIS trade only.
+        Returns a list of lesson strings (allows multiple lessons per trade).
         Uses per-trade factors: strategy name, market regime at time of trade,
         exit reason, and whether this specific trade won or lost.
         Aggregate rolling stats (win rate, consecutive losses, avg PnL) belong
@@ -546,7 +635,7 @@ Be specific and data-driven. No generic platitudes. Speak as if reviewing your o
                 "or insufficient recent training data for current conditions."
             )
 
-        # ── Exit reason analysis (per-trade) ───────────────────────────────────
+        # ── Exit reason analysis (per-trade, multiple reasons can apply) ──────
         if exit_reason == "STOP_LOSS":
             lessons.append(
                 "Trade stopped out. Review: was the stop too tight for the ATR "
@@ -573,15 +662,27 @@ Be specific and data-driven. No generic platitudes. Speak as if reviewing your o
                 "short in strong trends — consider tightening trailing stop instead."
             )
 
-        # ── Fallback: no per-trade lesson triggered ────────────────────────────
+        # ── Regime warning for Scalper_5m (most active in recent trades) ───────
+        if strategy_name == "Scalper_5m" and regime in ("TRENDING_UP", "TRENDING_DOWN") and not won:
+            lessons.append(
+                "Lesson: Scalper_5m signals in a strong trend often get stopped "
+                "out by momentum reversals. Use a wider stop or wait for pullback."
+            )
+        elif strategy_name == "Scalper_5m" and won:
+            lessons.append(
+                "Lesson: Scalper_5m captured a short-term move successfully. "
+                "Confirm volume and RSI divergence at entry for better timing."
+            )
+
+        # ── Fallback: no per-trade lesson triggered ───────────────────────────
         if not lessons:
             lessons.append(
-                "Trade executed within normal parameters. "
+                f"Trade executed within normal parameters. "
                 f"Strategy: {strategy_name} | Regime: {regime} | "
                 f"Exit: {exit_reason} | {'Win' if won else 'Loss'}."
             )
 
-        return " | ".join(lessons)
+        return lessons
 
     # ─── Performance snapshots ─────────────────────────────────────────────────
 
@@ -619,6 +720,10 @@ Be specific and data-driven. No generic platitudes. Speak as if reviewing your o
             except Exception as e:
                 logger.warning(f"Performance snapshot failed for {name}: {e}")
 
+    def get_lesson_bias_snapshot(self) -> Dict[str, float]:
+        """Debug helper: return current lesson penalty per strategy."""
+        return dict(self._lesson_bias)
+
     # ─── Utility ──────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -634,3 +739,6 @@ Be specific and data-driven. No generic platitudes. Speak as if reviewing your o
                 break
         word = "winning" if last else "losing"
         return f"Current {word} streak: {streak} trade(s)."
+
+
+

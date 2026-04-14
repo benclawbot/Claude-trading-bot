@@ -11,7 +11,7 @@ self-learning, and a real-time Dash dashboard.
 |---|---|
 | Strategies | 5 independent strategies (RSI+BB, MACD, EMA Cross, Breakout, ML Adaptive) |
 | Backtesting | 500-day walk-forward test; only strategies ≥50% CAGR are activated |
-| Execution | Binance REST API (Spot); Testnet by default |
+| Execution | CCXT (Binance Spot currently); Testnet via sandbox mode |
 | Self-learning | RandomForest model trained on closed trades; parameter auto-tuning |
 | Dashboard | Dash app: equity curve, positions, trade history, journal |
 | Capital | Starts with $10,000 split equally across active strategies |
@@ -37,6 +37,25 @@ cp .env.example .env
 
 Get **Testnet** keys (free, no real funds) at:
 https://testnet.binance.vision/
+
+Optional multi-exchange data via ccxt:
+```bash
+export EXCHANGE_DATA_BACKEND=ccxt
+export EXCHANGE_ID=kraken   # e.g. binance, bybit, kraken, okx
+```
+(Keep `EXCHANGE_ID=binance` if you only want ccxt abstraction with Binance data.)
+
+Execution parity + OCO controls:
+```bash
+export PAPER_LIVE_PARITY_CHECK=true   # logs live-equivalent ccxt payload in paper mode
+export OCO_EXECUTION_MODE=auto        # auto | exchange | managed
+export CAPITAL_ALLOCATION_MODE=equal  # equal | experiment_weighted
+export MIN_BACKTEST_TRADES=12         # prevents tiny-sample overfitting activation
+export PRICE_SANITY_MAX_JUMP_PCT=0.08 # rejects implausible single-tick jumps
+```
+- auto: try exchange-native OCO where available, fallback to managed SL/TP
+- exchange: force exchange OCO attempt first, fallback if endpoint unavailable
+- managed: always use internal SL/TP monitoring (no exchange OCO placement)
 
 ### 3. Run backtest only (recommended first step)
 
@@ -120,6 +139,35 @@ If no Binance API keys are provided the bot runs in **demo mode**:
 - All other features (dashboard, learning, journal) function identically
 
 ---
+
+## Autoresearch Loop (Guardrails + Strategy Params)
+
+This repo now includes a Karpathy-style optimizer that mutates both:
+- guardrails (`MIN_*`, risk limits, confidence gate)
+- strategy parameters (`STRATEGY_PARAMS` numeric fields)
+
+while optimizing for:
+- consistency
+- profit %
+- cycle throughput (`AUTORESEARCH_TARGET_TRADES_PER_DAY`, default 20)
+- live challenge score from recent non-backtest trades (anti-overfit guard)
+
+Run:
+
+```bash
+python autoresearch_trading.py --cycles 80 --target-trades-per-day 20 --apply
+```
+
+This writes:
+- `ops/autoresearch/results.tsv` (all cycles)
+- `ops/autoresearch/best_config.json` (best promoted candidate)
+
+Enable the winner in runtime:
+
+```bash
+export AUTORESEARCH_USE_OVERRIDES=true
+python main.py
+```
 
 ## Disclaimer
 

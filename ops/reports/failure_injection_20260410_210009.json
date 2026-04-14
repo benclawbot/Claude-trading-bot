@@ -1,0 +1,35 @@
+{
+  "timestamp_utc": "2026-04-10T21:00:09.125463+00:00",
+  "scenario": "bot_kill_then_watchdog_remediate",
+  "mode": "dry_run",
+  "baseline": {
+    "status": "ok",
+    "issues": [],
+    "actions": [],
+    "gateway": {
+      "healthy": true,
+      "warnings": [],
+      "exit_code": 0,
+      "raw": "\u25cf hermes-gateway.service - Hermes Agent Gateway - Messaging Platform Integration\n     Loaded: loaded (/home/thomas/.config/systemd/user/hermes-gateway.service; enabled; preset: enabled)\n    Drop-In: /home/thomas/.config/systemd/user/hermes-gateway.service.d\n             \u2514\u2500override.conf\n     Active: active (running) since Fri 2026-04-10 19:18:16 CEST; 3h 41min ago\n   Main PID: 492226 (python)\n      Tasks: 30 (limit: 4153)\n     Memory: 388.7M (peak: 1.3G swap: 473.8M swap peak: 549.8M)\n        CPU: 17min 48.390s\n     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/hermes-gateway.service\n             \u251c\u2500492226 /home/thomas/Downloads/hermes-agent-enhanced/.venv/bin/python -m hermes_cli.main gateway run --replace\n             \u251c\u2500693086 /usr/bin/bash -lic \"printf '__HERMES_FENCE_a9f7b3__'\\n./.venv/bin/python ops/diagnostics/failure_injection_check.py\\n__hermes_rc=\\$?\\nprintf '__HERMES_FENCE_a9f7b3__'\\nexit \\$__hermes_rc\\n\"\n             \u251c\u2500693334 ./.venv/bin/python ops/diagnostics/failure_injection_check.py\n             \u251c\u2500693336 ./.venv/bin/python ops/diagnostics/stack_watchdog.py\n             \u251c\u2500693341 /home/thomas/.hermes/hermes-agent/venv/bin/python3 /home/thomas/.local/bin/hermes gateway status\n             \u2514\u2500693347 systemctl --user status hermes-gateway --no-pager\n\nApr 10 21:07:35 thomas-MacBookAir6-2 python[492226]:   \u250a \u23f0 cron      run 6bc4ba3c68ae  0.0s\nApr 10 21:07:35 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udd0e find      *.md  1.4s\nApr 10 21:07:35 thomas-MacBookAir6-2 python[492226]:   \u250a \ud83d\udd0e find      *.md  0.9s\nApr 10 21:07:35 thomas-MacBookAir6-2 python[492226]:   [tool] (\u2267\u25e1\u2266) \ud83d\udcbb cd /home/thomas/Dropbox/Projects/Claude-trading-bot && ./.venv/bin/python ops/diagnostics/stack_watchdog.py --remediate\nApr 10 21:07:37 thomas-MacBookAir6-2 python[492226]:   [done] \u250a \ud83d\udcbb $         cd /home/thomas/Dropbox/Projects/Claude-trading-bot && ./.venv/bin/python ops/diagnostics/stack_watchdog.py --remediate  1.4s (1.5s)\nApr 10 21:08:41 thomas-MacBookAir6-2 python[492226]: WARNING agent.auxiliary_client: resolve_provider_client: openai-codex requested but no Codex OAuth token found (run: hermes model)\nApr 10 21:22:09 thomas-MacBookAir6-2 python[492226]: WARNING agent.auxiliary_client: resolve_provider_client: openai-codex requested but no Codex OAuth token found (run: hermes model)\nApr 10 21:30:20 thomas-MacBookAir6-2 python[492226]: WARNING agent.auxiliary_client: resolve_provider_client: openai-codex requested but no Codex OAuth token found (run: hermes model)\nApr 10 22:21:37 thomas-MacBookAir6-2 python[492226]: WARNING agent.auxiliary_client: resolve_provider_client: openai-codex requested but no Codex OAuth token found (run: hermes model)\nApr 10 22:44:19 thomas-MacBookAir6-2 python[492226]: WARNING root: Failed to generate context summary: Error code: 402 - {'error': {'message': 'Insufficient credits. Add more using https://openrouter.ai/settings/credits', 'code': 402}}. Further summary attempts paused for 600 seconds.\n\u2713 User gateway service is running\n\u2713 Systemd linger is enabled (service survives logout)"
+    },
+    "bot": {
+      "running": true,
+      "pids": [
+        623780
+      ],
+      "uptime_seconds": 7217
+    },
+    "dashboard": {
+      "listening": true,
+      "http_ok": true,
+      "healthy": true
+    },
+    "startup_grace": false,
+    "exit_code": 0
+  },
+  "status": "PASS",
+  "notes": "dry-run only; no process killed",
+  "bot_killed_pid": null,
+  "remediation_seconds": 0,
+  "gate_mttr_le_300s": true
+}
