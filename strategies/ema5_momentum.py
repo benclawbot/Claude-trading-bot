@@ -22,7 +22,7 @@ from .base_strategy import BaseStrategy, Signal, SignalType
 
 class EMA5MomentumStrategy(BaseStrategy):
 
-    def __init__(self, params: dict = None):
+    def __init__(self, params: dict = None, name: str = None):
         defaults = config.STRATEGY_PARAMS.get("EMA5_Momentum", {
             "ema_period":      3,
             "atr_sl_mult":     0.75,
@@ -31,7 +31,7 @@ class EMA5MomentumStrategy(BaseStrategy):
         })
         if params:
             defaults.update(params)
-        super().__init__("EMA5_Momentum", defaults)
+        super().__init__(name or "EMA5_Momentum", defaults)
 
     # ── Interface ─────────────────────────────────────────────────────────────
 
