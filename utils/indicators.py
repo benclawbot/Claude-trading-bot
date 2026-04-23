@@ -129,10 +129,14 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["candle_range"] = h - l
     df["body_ratio"]   = df["candle_body"] / (df["candle_range"] + 1e-8)
 
+    df["rolling_high_20"] = h.rolling(20, min_periods=1).max()
+    df["rolling_low_10"]  = l.rolling(10, min_periods=1).min()
     df["rolling_high_24"] = h.rolling(24, min_periods=1).max()
     df["rolling_low_24"]  = l.rolling(24, min_periods=1).min()
     df["rolling_high_48"] = h.rolling(48, min_periods=1).max()
     df["rolling_low_48"]  = l.rolling(48, min_periods=1).min()
+    # BTC momentum breakout: 20-day high of CLOSES (not high-of-highs)
+    df["rolling_close_high_20"] = c.rolling(20, min_periods=1).max()
 
     df["return_1h"]     = c.pct_change(1)
     df["return_4h"]     = c.pct_change(4)

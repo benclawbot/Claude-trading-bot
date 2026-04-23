@@ -163,6 +163,23 @@ STRATEGY_PARAMS = {
         "atr_tp_mult":      3.8,
         "candle_interval":  "4h",
     },
+    "BTC_MomentumBreakout": {
+        # Source  : Vault – BTC momentum breakout (backtested 2018-2026, +42% CAGR)
+        # Entry   : close > 200d EMA  AND  close > 20d close-high  AND  volume > 1.2× vol MA
+        # Exit    : close < 10d low  OR  close < 50d SMA  OR  -8% hard stop
+        # TP/SL   : ATR-based take-profit (3× ATR), dual SL (ATR-mult + -8% hard cap)
+        # Alpha   : catches sustained BTC breakouts in bull regimes; avoids chop
+        "sma_trend":          200,
+        "breakout_lookback":   20,
+        "volume_ma_period":    20,
+        "volume_mult":        1.2,
+        "exit_low_period":    10,
+        "sma_exit_period":    50,
+        "hard_stop_pct":     0.08,
+        "atr_tp_mult":       3.0,
+        "atr_sl_mult":       1.5,
+        "candle_interval":  "1d",
+    },
 }
 
 
