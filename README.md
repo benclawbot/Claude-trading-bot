@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/btc-trading-bot-banner.svg" alt="BTC Autonomous Trading Bot" width="100%" />
+</p>
+
 # BTC Autonomous Trading Bot
 
 Autonomous multi-strategy BTC/USDT trading bot with backtesting, live execution,
