@@ -18,6 +18,7 @@ TESTNET_WS_URL   = "wss://testnet.binance.vision/ws"
 # PAPER_TRADING=true  → simulate orders at real Binance prices (default, safe)
 # PAPER_TRADING=false → live/testnet order execution (requires API keys)
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() == "true"
+ALLOW_MAINNET_TRADING = os.getenv("ALLOW_MAINNET_TRADING", "false").lower() == "true"
 
 # ─── Trading Parameters ────────────────────────────────────────────────────────
 SYMBOL             = "BTCUSDT"
@@ -62,7 +63,7 @@ LEARNING_UPDATE_INTERVAL_SEC = 180  # run learning update every 3 minutes
 DB_PATH = os.path.join(os.path.dirname(__file__), "trading_bot.db")
 
 # ─── Dashboard ─────────────────────────────────────────────────────────────────
-DASHBOARD_HOST      = "0.0.0.0"
+DASHBOARD_HOST      = os.getenv("DASHBOARD_HOST", "127.0.0.1")
 DASHBOARD_PORT      = 8050
 DASHBOARD_UPDATE_MS = 10000   # refresh every 10 seconds
 
@@ -229,6 +230,8 @@ def validate_config() -> list:
     if not PAPER_TRADING:
         if not BINANCE_API_KEY or not BINANCE_API_SECRET:
             errors.append("BINANCE_API_KEY and BINANCE_API_SECRET required for live trading")
+        if not USE_TESTNET and not ALLOW_MAINNET_TRADING:
+            errors.append("Mainnet execution requires ALLOW_MAINNET_TRADING=true")
     
     # Validate symbol format
     if not SYMBOL.endswith(("USDT", "BUSD", "USD")):
