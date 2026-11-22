@@ -46,7 +46,7 @@ METADATA_PATH = os.path.join(MODEL_DIR, "ml_adaptive_meta.pkl")
 class MLAdaptiveStrategy(BaseStrategy):
 
     def __init__(self, params: dict = None):
-        defaults = config.STRATEGY_PARAMS["ML_Adaptive"].copy()
+        defaults = config.STRATEGY_PARAMS.get("ML_Adaptive", {}).copy()  # retired from active registry
         if params:
             defaults.update(params)
         super().__init__("ML_Adaptive", defaults)
@@ -195,7 +195,7 @@ class MLAdaptiveStrategy(BaseStrategy):
                     "long_score": long_score, 
                     "short_score": short_score,
                     "applicable_lessons": self.get_applicable_lessons(regime) if caution_level > 0.3 else [],
-                })
+                }
             )
         elif short_score >= long_score + 0.15:
             sl = close + 1.5 * atr

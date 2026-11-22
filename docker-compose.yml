@@ -11,12 +11,14 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
+      - DASHBOARD_HOST=0.0.0.0
+      - PAPER_TRADING=true
     volumes:
       - ./trading_bot.db:/app/trading_bot.db
       - ./models:/app/models
       - ./trading_bot.log:/app/trading_bot.log
     ports:
-      - "8050:8050"
+      - "127.0.0.1:8050:8050"
 
   # Optional: Prometheus metrics exporter
   # metrics-exporter:

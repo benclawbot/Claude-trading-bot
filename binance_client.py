@@ -466,7 +466,10 @@ def place_market_order_with_retry(client, symbol: str, side: str,
     
     # Retry loop
     last_error = None
-    for attempt in range(ORDER_MAX_RETRIES):
+    # A timeout after submitting a real market order is ambiguous: retrying
+    # without a stable clientOrderId may duplicate a filled trade.
+    attempts = 1 if use_live else ORDER_MAX_RETRIES
+    for attempt in range(attempts):
         try:
             if use_live and client:
                 order = client.create_order(
@@ -483,14 +486,14 @@ def place_market_order_with_retry(client, symbol: str, side: str,
         except Exception as e:
             last_error = e
             _circuit_breaker.record_failure()
-            logger.warning(f"Order attempt {attempt + 1}/{ORDER_MAX_RETRIES} failed: {e}")
+            logger.warning(f"Order attempt {attempt + 1}/{attempts} failed: {e}")
             
-            if attempt < ORDER_MAX_RETRIES - 1:
+            if attempt < attempts - 1:
                 sleep_time = ORDER_RETRY_BACKOFF * (2 ** attempt)  # Exponential backoff
                 logger.info(f"Retrying in {sleep_time:.1f}s...")
                 time.sleep(sleep_time)
     
-    logger.error(f"Order failed after {ORDER_MAX_RETRIES} attempts: {last_error}")
+    logger.error(f"Order failed after {attempts} attempt(s): {last_error}")
     return None
 
 
@@ -531,6 +534,10 @@ class BinanceClient:
         if not BINANCE_SDK_AVAILABLE:
             return
         if not config.BINANCE_API_KEY or not config.BINANCE_API_SECRET:
+            return
+        # Never activate mainnet without a second independent explicit opt-in.
+        if not config.USE_TESTNET and not getattr(config, "ALLOW_MAINNET_TRADING", False):
+            logger.error("Mainnet blocked: set ALLOW_MAINNET_TRADING=true explicitly")
             return
         # Don't activate live trading unless explicitly set to PAPER_TRADING=false
         if getattr(config, "PAPER_TRADING", True):
