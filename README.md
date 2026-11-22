@@ -27,7 +27,7 @@ self-learning, and a real-time Dash dashboard.
 ### 1. Install dependencies
 
 ```bash
-cd btc_trading_bot
+cd Claude-trading-bot
 pip install -r requirements.txt
 ```
 
@@ -36,7 +36,7 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # Edit .env with your Binance API keys
-# Leave USE_TESTNET=true until you're confident
+# Paper trading is enabled by default; testnet execution requires PAPER_TRADING=false
 ```
 
 Get **Testnet** keys (free, no real funds) at:
@@ -104,6 +104,14 @@ After each closed trade:
 6. **Journal entry** generated with reflection text and lessons
 
 ---
+
+## Security defaults
+
+The dashboard listens on 127.0.0.1 by default; Docker publishes it only on the host loopback address. To expose it remotely, place an authenticated TLS reverse proxy in front of it. The application does not implement dashboard login.
+
+Exchange order execution is disabled by default (`PAPER_TRADING=true`). Enable testnet deliberately with credentials, `PAPER_TRADING=false`, and `USE_TESTNET=true`. Real-money mainnet also requires `ALLOW_MAINNET_TRADING=true` and `USE_TESTNET=false`. A failed or timed-out live market-order submission is **not retried automatically** because its exchange execution status could be unknown. Reconcile order state with the exchange before taking any further action.
+
+Docker excludes local `.env` and trade databases from the build context. Pass credentials to the container only through your deployment's secret-management mechanism; do not bake secrets into images.
 
 ## Risk Management
 
