@@ -195,7 +195,7 @@ class MLAdaptiveStrategy(BaseStrategy):
                     "long_score": long_score, 
                     "short_score": short_score,
                     "applicable_lessons": self.get_applicable_lessons(regime) if caution_level > 0.3 else [],
-                })
+                }
             )
         elif short_score >= long_score + 0.15:
             sl = close + 1.5 * atr
