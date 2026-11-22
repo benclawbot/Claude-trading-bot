@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.log.*
+__pycache__
+.pytest_cache
+.venv
+venv
+models/
+*.pem
+*.key
