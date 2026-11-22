@@ -645,4 +645,4 @@ def run_dashboard(debug: bool = False):
 
 
 if __name__ == "__main__":
-    run_dashboard(debug=True)
+    run_dashboard(debug=False)
